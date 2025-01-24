@@ -16,7 +16,11 @@ async function getPrediction(income, expenses, month, savings) {
     const scriptPath = join(__dirname, '..', 'ml', 'expense_predictor.py');
     console.log('Running Python script:', scriptPath);
     
-    const pythonProcess = spawn('py', [
+    // Use 'python3' on Linux (Render) and 'py' on Windows
+    const pythonCommand = process.platform === 'win32' ? 'py' : 'python3';
+    console.log('Using Python command:', pythonCommand);
+    
+    const pythonProcess = spawn(pythonCommand, [
       scriptPath,
       income.toString(),
       expenses.toString(),
