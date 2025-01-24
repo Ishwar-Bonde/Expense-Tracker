@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Settings } from 'lucide-react';
 import Navbar from '../components/Navbar';
+import { API_BASE_URL } from '../config';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'CNY', 'INR'];
 
@@ -14,7 +15,7 @@ function ChangeCurrency() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await fetch('https://expense-tracker-backend-d14o.onrender.com/api/transactions/currency', {
+      const response = await fetch(`${API_BASE_URL}/api/transactions/currency`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

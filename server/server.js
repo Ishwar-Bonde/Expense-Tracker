@@ -7,6 +7,7 @@ import categoryRoutes from './routes/categories.js';
 import settingsRoutes from './routes/settings.js';
 import adminRoutes from './routes/admin.js';
 import predictionsRoutes from './routes/predictions.js';
+import themeRoutes from './routes/theme.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -15,9 +16,15 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: 'https://expense-tracker-frontend-4316.onrender.com',
-  credentials: true
+  origin: ['http://localhost:5173', 'http://localhost:5174'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Enable pre-flight requests for all routes
+app.options('*', cors());
+
 app.use(express.json());
 
 // Routes
@@ -27,6 +34,7 @@ app.use('/api/categories', categoryRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/predictions', predictionsRoutes);
+app.use('/api/theme', themeRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
