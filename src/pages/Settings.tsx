@@ -388,27 +388,42 @@ const Settings = () => {
   const handleNotificationsToggle = async (enabled: boolean) => {
     try {
       if (enabled) {
-        // Request notification permission if enabled
-        if ('Notification' in window) {
-          const permission = await Notification.requestPermission();
-          if (permission === 'granted') {
-            setPreferences(prev => ({ 
-              ...prev, 
-              notifications: { budgetAlerts: true }  
-            }));
-            localStorage.setItem('notificationsEnabled', 'true');
-            
-            // Send test notification
-            setTimeout(() => {
-              sendNotification('Expense Tracker Notifications Enabled! 🎉', {
-                body: 'You will now receive notifications for budget alerts and important updates.',
-                icon: '/logo.png',
-                badge: '/logo.png'
-              });
-            }, 1000);
-          }
+        // Check if notifications are supported
+        if (!('Notification' in window)) {
+          toast.error('Notifications are not supported in your browser');
+          return;
         }
+
+        // Check if already denied
+        if (Notification.permission === 'denied') {
+          toast.error('Notifications are blocked. Please enable them in your browser settings.');
+          return;
+        }
+
+        // Request permission if not already granted
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          toast.error('Notification permission was denied');
+          return;
+        }
+
+        // Only update settings if permission was granted
+        setPreferences(prev => ({ 
+          ...prev, 
+          notifications: { budgetAlerts: true }  
+        }));
+        localStorage.setItem('notificationsEnabled', 'true');
+        
+        // Send test notification
+        setTimeout(() => {
+          sendNotification('Expense Tracker Notifications Enabled! 🎉', {
+            body: 'You will now receive notifications for budget alerts and important updates.',
+            icon: '/logo.png',
+            badge: '/logo.png'
+          });
+        }, 1000);
       } else {
+        // Disabling notifications doesn't require permission check
         setPreferences(prev => ({ 
           ...prev, 
           notifications: { budgetAlerts: false }  
@@ -416,7 +431,7 @@ const Settings = () => {
         localStorage.setItem('notificationsEnabled', 'false');
       }
 
-      // Update server
+      // Only update server if the state actually changed
       const response = await fetchWithAuth(`${API_BASE_URL}/api/settings`, {
         method: 'PUT',
         headers: {
@@ -432,12 +447,55 @@ const Settings = () => {
         throw new Error('Failed to update notification settings');
       }
 
-      toast.success(enabled ? 'Notifications enabled' : 'Notifications disabled');
+      // Only show success toast if the operation was successful
+      if ((enabled && Notification.permission === 'granted') || !enabled) {
+        toast.success(enabled ? 'Notifications enabled' : 'Notifications disabled');
+      }
     } catch (error) {
       console.error('Error:', error);
       toast.error('Failed to update notification settings');
+      
+      // Revert the local state if server update failed
+      setPreferences(prev => ({ 
+        ...prev, 
+        notifications: { budgetAlerts: !enabled }  
+      }));
+      localStorage.setItem('notificationsEnabled', (!enabled).toString());
     }
   };
+
+  useEffect(() => {
+    const checkNotificationPermission = async () => {
+      if ('Notification' in window) {
+        if (Notification.permission === 'denied' && preferences.notifications.budgetAlerts) {
+          // If notifications are blocked but enabled in settings, disable them
+          setPreferences(prev => ({ 
+            ...prev, 
+            notifications: { budgetAlerts: false }  
+          }));
+          localStorage.setItem('notificationsEnabled', 'false');
+          
+          // Update server
+          try {
+            await fetchWithAuth(`${API_BASE_URL}/api/settings`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                ...preferences,
+                notifications: { budgetAlerts: false }  
+              })
+            });
+          } catch (error) {
+            console.error('Error updating notification settings:', error);
+          }
+        }
+      }
+    };
+
+    checkNotificationPermission();
+  }, []);
 
   useEffect(() => {
     const notificationsEnabled = localStorage.getItem('notificationsEnabled') === 'true';

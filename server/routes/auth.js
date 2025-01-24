@@ -6,6 +6,7 @@ import Settings from '../models/Settings.js';
 import Category from '../models/Category.js';
 import Transaction from '../models/Transaction.js';
 import RecurringTransaction from '../models/RecurringTransaction.js';
+import Session from '../models/Session.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -29,16 +30,42 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
+    // Generate new token
     const token = jwt.sign(
       { userId: user._id },
       process.env.JWT_SECRET,
       { 
-        expiresIn: '24h',  
+        expiresIn: '24h',
         issuer: 'ExpenseTracker',
         audience: 'ExpenseTrackerUser'
       }
     );
 
+    // Get device info
+    const deviceInfo = req.headers['user-agent'] || 'Unknown Device';
+
+    // Deactivate all other sessions for this user
+    await Session.updateMany(
+      { userId: user._id, isActive: true },
+      { 
+        $set: { 
+          isActive: false,
+          lastActivity: new Date()
+        }
+      }
+    );
+
+    // Create new session
+    const session = new Session({
+      userId: user._id,
+      token,
+      deviceInfo,
+      isActive: true,
+      lastActivity: new Date()
+    });
+    await session.save();
+
+    // Generate refresh token
     const refreshToken = jwt.sign(
       { userId: user._id, type: 'refresh' },
       process.env.JWT_REFRESH_SECRET,
@@ -61,11 +88,27 @@ router.post('/login', async (req, res) => {
     res.json({ 
       token,
       refreshToken,
-      user: userWithoutPassword
+      user: userWithoutPassword,
+      message: 'Login successful'
     });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ message: 'Error logging in' });
+  }
+});
+
+// Logout route
+router.post('/logout', authenticateToken, async (req, res) => {
+  try {
+    // Deactivate the current session
+    await Session.updateOne(
+      { _id: req.session._id },
+      { $set: { isActive: false }}
+    );
+    res.json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    res.status(500).json({ message: 'Error logging out' });
   }
 });
 

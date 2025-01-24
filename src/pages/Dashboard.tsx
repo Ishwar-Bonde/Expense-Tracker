@@ -147,6 +147,7 @@ function Dashboard() {
   const [incomeCategories, setIncomeCategories] = useState<Category[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<Category[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [showSavingsGoalModal, setShowSavingsGoalModal] = useState(false);
 
   // Format for chart labels
   const formatChartCurrency = (value: number) => {
@@ -203,7 +204,7 @@ function Dashboard() {
   const fetchAllData = async () => {
     try {
       setIsLoading(true);
-      const response = await fetchWithAuth(`${API_BASE_URL}/api/transactions?limit=5`);
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/transactions`);
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -816,6 +817,11 @@ function Dashboard() {
   };
 
   const handleSaveSavings = async () => {
+    if (newSavingsGoal <= 0) {
+      toast.error('Please enter a savings goal greater than 0');
+      return;
+    }
+
     try {
       console.log('Saving savings goal:', newSavingsGoal); // Debug log
       const response = await fetchWithAuth(`${API_BASE_URL}/api/settings`, {
@@ -847,6 +853,40 @@ function Dashboard() {
     } catch (error) {
       console.error('Error saving savings goal:', error); // Debug log
       toast.error('Failed to update monthly savings goal');
+    }
+  };
+  const handleRemoveGoal = async () => {
+    try {
+      console.log('removing savings goal:', newSavingsGoal); // Debug log
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...settings,
+          savingsGoal: 0
+        })
+      });
+
+      const data = await response.json();
+      console.log('Save savings response:', data); // Debug log
+
+      if (!response.ok) {
+        throw new Error('Failed to remove savings goal');
+      }
+
+      setSettings(prev => ({
+        ...prev,
+        savingsGoal: 0
+      }));
+
+      await fetchUserSettings(); // Refresh settings after update
+      toast.success('Monthly savings goal removed successfully');
+      setShowSavingsModal(false);
+    } catch (error) {
+      toast.error('Failed to remove monthly savings goal');
+      console.error('Error removing savings goal:', error);
     }
   };
 
@@ -963,7 +1003,7 @@ function Dashboard() {
           </div>
           <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
             <div
-              className={`h-full rounded-full transition-all duration-300 ease-in-out ${
+              className={`h-full rounded-full transition-all duration-300 ${
                 amount >= settings.savingsGoal
                   ? 'bg-green-500 dark:bg-green-400'
                   : 'bg-green-300 dark:bg-green-600'
@@ -992,6 +1032,44 @@ function Dashboard() {
   const incomeData = preparePieChartData(transactions, 'income');
   const expenseData = preparePieChartData(transactions, 'expense');
 
+  const handleSaveGoal = async () => {
+    if (newSavingsGoal <= 0) {
+      toast.error('Please enter a savings goal greater than 0');
+      return;
+    }
+
+    try {
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/settings`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          savingsGoal: newSavingsGoal
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update savings goal');
+      }
+
+      // Update local settings
+      setSettings(prev => ({
+        ...prev,
+        savingsGoal: newSavingsGoal
+      }));
+
+      // Close modal and show success message
+      setShowSavingsGoalModal(false);
+      toast.success('Savings goal updated successfully!');
+    } catch (error) {
+      toast.error('Failed to update savings goal');
+      console.error('Error updating savings goal:', error);
+    }
+  };
+
+
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar />
@@ -1001,16 +1079,27 @@ function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {/* Total Balance */}
           <motion.div
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6"
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 relative group"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
           >
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                  Total Balance
-                </h3>
-                <p className="text-2xl font-semibold text-gray-700 dark:text-gray-200">
+                <div className="flex items-center">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Total Balance
+                  </h3>
+                  <div className="group relative ml-2">
+                  <AlertTriangle size={16} className="text-gray-400 hover:text-gray-600 cursor-help" />
+
+                    <div className="hidden group-hover:block absolute z-10 w-48 p-2 mt-2 text-sm text-white bg-gray-900 rounded-lg shadow-lg">
+                      {totalIncome - totalExpenses < 0
+                        ? "A negative balance indicates you've spent more than your income"
+                        : "Your total income minus total expenses"}
+                    </div>
+                  </div>
+                </div>
+                <p className={`text-2xl font-semibold ${totalIncome - totalExpenses < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
                   {formatAmount(totalIncome - totalExpenses)}
                 </p>
               </div>
@@ -1047,7 +1136,7 @@ function Dashboard() {
                 <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">
                   Total Income
                 </h3>
-                <p className="text-2xl font-semibold text-gray-700 dark:text-gray-200">
+                <p className="text-2xl font-semibold text-green-600 dark:text-green-400">
                   {formatAmount(totalIncome)}
                 </p>
               </div>
@@ -1073,7 +1162,7 @@ function Dashboard() {
                 <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">
                   Total Expenses
                 </h3>
-                <p className="text-2xl font-semibold text-gray-700 dark:text-gray-200">
+                <p className="text-2xl font-semibold text-red-600 dark:text-red-400">
                   {formatAmount(totalExpenses)}
                 </p>
               </div>
@@ -1087,21 +1176,100 @@ function Dashboard() {
             </div>
           </motion.div>
 
-          {/* Monthly Savings */}
-          {renderStatsCard(
-            'Monthly Savings', 
-            monthlySavings, 
-            <PiggyBank className="w-6 h-6 text-purple-600 dark:text-purple-400" />, 
-            '', 
-            '', 
-            false
-          )}
+          {/* Monthly Goal */}
+          <motion.div
+            className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 relative group"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <div className="flex items-center">
+                  <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                    {settings.savingsGoal ? (monthlySavings < 0 ? 'Monthly Deficit' : 'Monthly Savings') : 'Monthly Goal'}
+                  </h3>
+                  <div className="group relative ml-2">
+                    <AlertTriangle size={16} className="text-gray-400 hover:text-gray-600 cursor-help" />
+                    <div className="hidden group-hover:block absolute z-10 w-48 p-2 mt-2 text-sm text-white bg-gray-900 rounded-lg shadow-lg">
+                      {settings.savingsGoal 
+                        ? (monthlySavings < 0 
+                          ? "You're spending more than your monthly income"
+                          : "The amount you're saving this month")
+                        : "Set a monthly savings goal to track your progress"}
+                    </div>
+                  </div>
+                </div>
+                {settings.savingsGoal ? (
+                  <p className={`text-2xl font-semibold ${monthlySavings < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                    {formatAmount(Math.abs(monthlySavings))}
+                  </p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-2xl font-semibold text-gray-400 dark:text-gray-500">
+                      --
+                    </p>
+                    <button
+                      onClick={() => {
+                        setNewSavingsGoal(settings.savingsGoal);
+                        setShowSavingsModal(true);
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
+                    >
+                      Set Goal
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="p-3 bg-purple-100 dark:bg-purple-900 rounded-full">
+                <PiggyBank className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+              </div>
+            </div>
+            {settings.savingsGoal > 0 && (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500 dark:text-gray-400">Progress</span>
+                  <span className={`${monthlySavings < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                    {Math.min(Math.round(Math.abs(monthlySavings) / settings.savingsGoal * 100), 100)}%
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div 
+                    className={`h-2 rounded-full transition-all duration-300 ${
+                      monthlySavings < 0 ? 'bg-red-600 dark:bg-red-500' : 'bg-green-600 dark:bg-green-500'
+                    }`}
+                    style={{ 
+                      width: `${Math.min(Math.abs(monthlySavings) / settings.savingsGoal * 100, 100)}%`
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </motion.div>
+
+          
         </div>
+
+        {/* Budget Warning */}
+        {totalExpenses > settings.budgetLimit && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-8 rounded"
+          >
+            <div className="flex items-center">
+              <AlertTriangle className="w-5 h-5 mr-2" />
+              <p>
+                <span className="font-bold">Warning:</span> You've exceeded your monthly budget by {formatAmount(totalExpenses - settings.budgetLimit)}
+              </p>
+            </div>
+          </motion.div>
+        )}
 
         {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           {/* Budget Progress */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-lg">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
                 Budget Progress
@@ -1152,20 +1320,30 @@ function Dashboard() {
           </div>
 
           {/* Savings Progress */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 shadow-lg">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
                 Savings Progress
               </h3>
-              <button
-                onClick={() => {
-                  setNewSavingsGoal(settings.savingsGoal);
-                  setShowSavingsModal(true);
-                }}
-                className="px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transform-gpu"
-              >
-                {settings.savingsGoal === 0 ? 'Set Goal' : 'Edit Goal'}
-              </button>
+              {settings.savingsGoal > 0 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setNewSavingsGoal(settings.savingsGoal);
+                      setShowSavingsModal(true);
+                    }}
+                    className="px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transform-gpu"
+                  >
+                    Edit Goal
+                  </button>
+                  <button
+                    onClick={handleRemoveGoal}
+                    className="px-3 py-1 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transform-gpu"
+                  >
+                    Remove Goal
+                  </button>
+                </div>
+              )}
             </div>
             {settings.savingsGoal === 0 ? (
               <div className="text-center py-4 text-gray-500 dark:text-gray-400">
@@ -1176,19 +1354,19 @@ function Dashboard() {
                 <div className="flex mb-2 items-center justify-between">
                   <div>
                     <span className="text-sm font-semibold inline-block text-green-600">
-                      Savings Progress ({formatCurrency(convertedAmounts.savings, userCurrency)} / {formatCurrency(convertedAmounts.savingsGoal, userCurrency)})
+                      Savings Progress ({formatAmount(Math.abs(monthlySavings))} / {formatAmount(settings.savingsGoal)})
                     </span>
                   </div>
                   <div className="text-right">
                     <span className="text-xs font-semibold inline-block text-green-600">
-                      {progress.savingsProgress.toFixed(1)}%
+                      {Math.min(Math.round(Math.abs(monthlySavings) / settings.savingsGoal * 100), 100)}%
                     </span>
                   </div>
                 </div>
                 <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-green-200">
                   <div
                     style={{ 
-                      width: `${progress.savingsProgress}%`,
+                      width: `${Math.min(Math.abs(monthlySavings) / settings.savingsGoal * 100, 100)}%`,
                       backgroundColor: '#10b981'  // green
                     }}
                     className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-500"
@@ -1694,7 +1872,7 @@ function Dashboard() {
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Enter your monthly savings target in {userCurrency}
+                        Enter your monthly savings target in INR
                       </label>
                       <div className="mt-1 relative rounded-md shadow-sm">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -1703,11 +1881,10 @@ function Dashboard() {
                         <input
                           type="number"
                           value={newSavingsGoal}
-                          onChange={(e) => setNewSavingsGoal(Number(e.target.value))}
+                          onChange={(e) => setNewSavingsGoal(Math.max(1, Number(e.target.value)))}
                           className="block w-full pl-12 pr-4 py-3 border-gray-300 dark:border-gray-600 rounded-lg focus:ring-green-500 focus:border-green-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-lg"
-                          placeholder="0.00"
-                          min="0"
-                          step="0.01"
+                          placeholder="Enter amount greater than 0"
+                          min="1"
                         />
                       </div>
                     </div>
@@ -1720,6 +1897,7 @@ function Dashboard() {
                     type="button"
                     onClick={handleSaveSavings}
                     className="w-full sm:w-auto px-6 py-3 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors"
+                    disabled={newSavingsGoal <= 0}
                   >
                     Save Goal
                   </button>
@@ -1736,6 +1914,44 @@ function Dashboard() {
           </div>
         </div>
       )}
+      {/* Savings Goal Modal */}
+      {showSavingsGoalModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-96">
+            <h2 className="text-xl font-semibold text-gray-800 dark:text-white mb-4">
+              Set Monthly Savings Goal
+            </h2>
+            <div className="mb-4">
+              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-2">
+                Enter your monthly savings target in INR
+              </label>
+              <input
+                type="number"
+                value={newSavingsGoal}
+                onChange={(e) => setNewSavingsGoal(Math.max(1, Number(e.target.value)))}
+                className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                placeholder="Enter amount greater than 0"
+                min="1"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowSavingsGoalModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveGoal}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+              >
+                Save Goal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
     </div>
   );
 }

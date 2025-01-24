@@ -1,88 +1,80 @@
-import { toast } from 'react-toastify';
+import toast from 'react-hot-toast';
 import { API_BASE_URL } from '../config';
 
 const checkTokenExpiry = () => {
   const expiryTime = localStorage.getItem('tokenExpiry');
-  if (!expiryTime) return true;
+  if (!expiryTime) return false;
 
-  const now = new Date();
   const expiry = new Date(expiryTime);
-  return now >= expiry;
+  const now = new Date();
+  return now > expiry;
 };
 
 export const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
-  let token = localStorage.getItem('token');
-  const refreshToken = localStorage.getItem('refreshToken');
-
-  // Check if token has expired
-  if (checkTokenExpiry()) {
-    // Try to refresh the token
-    if (refreshToken) {
-      try {
-        const refreshResponse = await fetch(`${API_BASE_URL}/api/auth/refresh-token`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ refreshToken })
-        });
-
-        if (refreshResponse.ok) {
-          const { token: newToken } = await refreshResponse.json();
-          localStorage.setItem('token', newToken);
-          
-          // Set new expiry time (1 hour from now)
-          const expiryTime = new Date();
-          expiryTime.setHours(expiryTime.getHours() + 1);
-          localStorage.setItem('tokenExpiry', expiryTime.toISOString());
-          
-          token = newToken;
-        } else {
-          // Refresh failed, clear storage and redirect to login
-          localStorage.clear();
-          window.location.href = '/login';
-          throw new Error('Session expired. Please login again.');
-        }
-      } catch (error) {
-        localStorage.clear();
-        window.location.href = '/login';
-        throw new Error('Session expired. Please login again.');
-      }
-    } else {
-      localStorage.clear();
-      window.location.href = '/login';
-      throw new Error('Session expired. Please login again.');
-    }
+  const token = localStorage.getItem('token');
+  
+  if (!token) {
+    window.location.href = '/login';
+    throw new Error('No authentication token found');
   }
 
-  // Determine if the URL is absolute or relative
-  const finalUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
-
   const headers = {
-    ...options.headers,
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
+    'Authorization': `Bearer ${token}`,
+    ...options.headers
   };
+
+  const finalUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
 
   try {
     const response = await fetch(finalUrl, { ...options, headers });
 
     if (response.status === 401) {
+      const data = await response.json();
       localStorage.clear();
-      window.location.href = '/login';
-      throw new Error('Session expired. Please login again.');
+
+      switch (data.error) {
+        case 'SESSION_INVALID':
+          toast.error('This account is already logged in on another device', {
+            duration: 5000,
+            position: 'top-center',
+          });
+          break;
+        case 'NO_ACTIVE_SESSION':
+          toast.error('Your session has expired. Please login again.', {
+            duration: 5000,
+            position: 'top-center',
+          });
+          break;
+        case 'TOKEN_EXPIRED':
+          toast.error('Your session has expired. Please login again.', {
+            duration: 5000,
+            position: 'top-center',
+          });
+          break;
+        default:
+          toast.error('Authentication failed. Please login again.', {
+            duration: 5000,
+            position: 'top-center',
+          });
+      }
+
+      // Add a small delay before redirect to show the toast
+      setTimeout(() => {
+        window.location.href = '/login';
+      }, 2000);
+
+      throw new Error(data.message || 'Authentication failed');
     }
 
     if (!response.ok) {
-      throw new Error(`Request failed with status ${response.status}`);
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Request failed');
     }
 
     return response;
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : 'Request failed');
-    if (error instanceof Error) {
-      throw error;
-    }
-    throw new Error('Network error');
+    console.error('Fetch error:', error);
+    throw error;
   }
 };
