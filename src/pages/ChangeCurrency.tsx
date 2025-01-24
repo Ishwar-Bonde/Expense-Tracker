@@ -14,7 +14,7 @@ function ChangeCurrency() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await fetch('https://expense-tracker-backend-v9yu.onrender.com/api/transactions/currency', {
+      const response = await fetch('https://expense-tracker-backend-d14o.onrender.com/api/transactions/currency', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
