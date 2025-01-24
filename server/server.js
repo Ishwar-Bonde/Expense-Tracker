@@ -15,7 +15,7 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: 'https://expense-tracker-frontend-4316.onrender.com',
   credentials: true
 }));
 app.use(express.json());
