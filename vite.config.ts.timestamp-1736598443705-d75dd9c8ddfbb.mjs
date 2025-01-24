@@ -8,7 +8,7 @@ var vite_config_default = defineConfig({
     host: true,
     proxy: {
       "/api": {
-        target: "http://localhost:5000",
+        target: "https://expense-tracker-backend-d14o.onrender.com",
         changeOrigin: true,
         secure: false
       }
