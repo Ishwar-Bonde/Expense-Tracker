@@ -115,7 +115,21 @@ npm run dev
 
 ## 📱 Screenshots
 
-[Add your application screenshots here]
+### Dashboard Overview
+![Dashboard](./screenshots/dashboard.png)
+*Main dashboard showing expense overview and charts*
+
+### Transaction Management
+![Transactions](./screenshots/transactions.png)
+*Transaction list with filtering and sorting options*
+
+### Loan Management
+![Loans](./screenshots/loans.png)
+*Loan management interface with repayment schedules*
+
+### ML Predictions
+![Predictions](./screenshots/predictions.png)
+*AI-powered expense predictions and insights*
 
 ## 🔒 Security Features
 - JWT-based authentication
@@ -146,7 +160,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - All contributors who helped shape this project
 
 ## 📞 Contact
-Ishwar Bonde - [Your Email]
+Ishwar Bonde - ishwarbonde40@gmail.com
 Project Link: [https://github.com/Ishwar-Bonde/Expense-Tracker](https://github.com/Ishwar-Bonde/Expense-Tracker)
 
 ---
