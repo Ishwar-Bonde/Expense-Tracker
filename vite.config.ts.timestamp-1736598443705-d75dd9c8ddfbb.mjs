@@ -1,6 +1,8 @@
 // vite.config.ts
 import { defineConfig } from "file:///D:/Downloads/project-bolt-sb1-cjkhzdc7/project/node_modules/vite/dist/node/index.js";
 import react from "file:///D:/Downloads/project-bolt-sb1-cjkhzdc7/project/node_modules/@vitejs/plugin-react/dist/index.mjs";
+import { API_BASE_URL } from "./src/config";
+
 var vite_config_default = defineConfig({
   plugins: [react()],
   server: {
@@ -8,7 +10,7 @@ var vite_config_default = defineConfig({
     host: true,
     proxy: {
       "/api": {
-        target: "http://localhost:5000",
+        target: API_BASE_URL,
         changeOrigin: true,
         secure: false
       }

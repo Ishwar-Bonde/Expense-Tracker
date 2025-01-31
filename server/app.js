@@ -11,12 +11,13 @@ import settingsRouter from './routes/settings.js';
 import insightsRouter from './routes/insights.js';
 import loansRouter from './routes/loans.js';
 import testRouter from './routes/test.js';
+import { API_FRONTEND_URL } from './config.js';
 
 const app = express();
 
 // Configure CORS
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://192.168.0.102:5173'],
+  origin: [API_FRONTEND_URL],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
