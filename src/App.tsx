@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { RouterProvider, createBrowserRouter, Route, createRoutesFromElements } from 'react-router-dom';
-import { applyTheme } from './utils/theme';
 import { API_BASE_URL } from './config';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -11,10 +10,16 @@ import AddExpense from './pages/AddExpense';
 import Settings from './pages/Settings';
 import RecurringTransactions from './pages/RecurringTransactions';
 import Predictions from './pages/Predictions';
-// import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from 'react-hot-toast';
 import PrivateRoute from './components/PrivateRoute';
 import Intro from './pages/Intro';
+import LoansPage from './pages/Loans';
+import LoanCalculatorPage from './pages/Loans/Calculator';
+import LoanComparePage from './pages/Loans/Compare';
+import NewLoanPage from './pages/Loans/New';
+import { getCurrentTheme, applyTheme } from './utils/theme';
+import { ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
 
 const router = createBrowserRouter(
   createRoutesFromElements(
@@ -29,6 +34,10 @@ const router = createBrowserRouter(
       <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
       <Route path="/recurring" element={<PrivateRoute><RecurringTransactions /></PrivateRoute>} />
       <Route path="/predictions" element={<PrivateRoute><Predictions /></PrivateRoute>} />
+      <Route path="/loans" element={<PrivateRoute><LoansPage /></PrivateRoute>} />
+      <Route path="/loans/new" element={<PrivateRoute><NewLoanPage /></PrivateRoute>} />
+      <Route path="/loans/calculator" element={<PrivateRoute><LoanCalculatorPage /></PrivateRoute>} />
+      <Route path="/loans/compare" element={<PrivateRoute><LoanComparePage /></PrivateRoute>} />
     </>
   ),
   {
@@ -40,39 +49,43 @@ const router = createBrowserRouter(
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
+  const [theme, setTheme] = useState(getCurrentTheme());
 
   useEffect(() => {
-    const initializeTheme = async () => {
+    const initializeApp = async () => {
+      // Load theme from API and apply it
       const token = localStorage.getItem('token');
-      
       if (token) {
         try {
-          // Fetch theme from MongoDB if user is logged in
           const response = await fetch(`${API_BASE_URL}/api/theme`, {
             headers: {
-              'Authorization': `Bearer ${token}`
-            }
+              Authorization: `Bearer ${token}`,
+            },
           });
           
           if (response.ok) {
             const data = await response.json();
-            applyTheme(data.theme);
-          }
-          else {
-            applyTheme('light');
+            if (data.theme === 'light' || data.theme === 'dark') {
+              applyTheme(data.theme);
+              setTheme(getCurrentTheme());
+            }
           }
         } catch (error) {
-          console.error('Error fetching theme:', error);
-          applyTheme('light'); // Fallback to light theme if fetch fails
+          console.error('Error loading theme:', error);
         }
-      } else {
-        applyTheme('light'); // Fallback to light theme if user is not logged in
       }
-      
       setIsLoading(false);
     };
 
-    initializeTheme();
+    initializeApp();
+
+    // Listen for theme changes
+    const handleThemeChange = () => {
+      setTheme(getCurrentTheme());
+    };
+
+    window.addEventListener('themechange', handleThemeChange);
+    return () => window.removeEventListener('themechange', handleThemeChange);
   }, []);
 
   if (isLoading) {
@@ -80,10 +93,19 @@ function App() {
   }
 
   return (
-    <>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
       <RouterProvider router={router} />
-      <Toaster position="bottom-right" />
-    </>
+      <Toaster 
+        position="bottom-right"
+        toastOptions={{
+          style: {
+            background: theme.palette.background.paper,
+            color: theme.palette.text.primary,
+          },
+        }} 
+      />
+    </ThemeProvider>
   );
 }
 

@@ -96,3 +96,70 @@ export function isValidOccurrence(date: Date, options: RecurringDateOptions): bo
   });
   return occurrenceDate.getTime() === startOfDay(date).getTime();
 }
+
+// Process recurring transactions and update their next due dates
+export async function processRecurringTransactions(transaction: any, API_BASE_URL: string) {
+  try {
+    const today = new Date();
+    const nextDueDate = new Date(transaction.nextDueDate);
+    
+    // If the next due date has passed
+    if (nextDueDate <= today) {
+      // Create the actual transaction
+      const transactionPayload = {
+        title: transaction.title,
+        description: transaction.description,
+        amount: transaction.amount,
+        type: transaction.type,
+        categoryId: transaction.categoryId,
+        currency: transaction.currency,
+        date: nextDueDate.toISOString(),
+        icon: transaction.icon
+      };
+
+      // Create the transaction
+      const token = localStorage.getItem('token');
+      await fetch(`${API_BASE_URL}/api/transactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(transactionPayload)
+      });
+
+      // Calculate the next occurrence
+      const newNextDueDate = calculateNextOccurrence({
+        startDate: nextDueDate,
+        frequency: transaction.frequency,
+        endDate: transaction.endDate ? new Date(transaction.endDate) : undefined
+      });
+
+      // Update the recurring transaction with the new next due date
+      await fetch(`${API_BASE_URL}/api/recurring-transactions/${transaction._id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          lastProcessedDate: nextDueDate.toISOString(),
+          nextDueDate: newNextDueDate.toISOString()
+        })
+      });
+
+      return {
+        success: true,
+        newNextDueDate: newNextDueDate.toISOString()
+      };
+    }
+
+    return {
+      success: false,
+      message: 'Next due date has not arrived yet'
+    };
+  } catch (error) {
+    console.error('Error processing recurring transaction:', error);
+    throw error;
+  }
+}

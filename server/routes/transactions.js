@@ -27,26 +27,28 @@ router.get('/', async (req, res) => {
 // Add new transaction
 router.post('/', async (req, res) => {
   try {
-    const { type, title, description, categoryId, amount, currency, date } = req.body;
+    const user = await User.findById(req.user.id).select('defaultCurrency');
+    const userCurrency = user.defaultCurrency || 'USD';
 
     // Validate required fields
-    if (!type || !title || !amount || !currency || !date) {
+    if (!req.body.title || !req.body.amount || !req.body.type || !req.body.categoryId) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    // Create new transaction
+    // Create the transaction
     const transaction = new Transaction({
+      ...req.body,
       userId: req.user.id,
-      type,
-      title,
-      description,
-      categoryId,
-      amount,
-      currency,
-      date: new Date(date)
+      currency: userCurrency,
+      date: req.body.date || new Date()
     });
 
     await transaction.save();
+    
+    // Populate the category before sending response
+    await transaction.populate('categoryId');
+    
+    console.log('Created transaction:', transaction); // Debug log
     res.status(201).json(transaction);
   } catch (error) {
     console.error('Error creating transaction:', error);
@@ -75,6 +77,38 @@ router.post('/bulk', async (req, res) => {
   } catch (error) {
     console.error('Error importing transactions:', error);
     res.status(500).json({ message: 'Failed to import transactions' });
+  }
+});
+
+// Bulk delete transactions
+router.post('/bulk-delete', async (req, res) => {
+  try {
+    const { transactionIds } = req.body;
+    
+    if (!Array.isArray(transactionIds) || transactionIds.length === 0) {
+      return res.status(400).json({ message: 'No transaction IDs provided' });
+    }
+
+    // Verify all transactions belong to the user
+    const transactions = await Transaction.find({
+      _id: { $in: transactionIds },
+      userId: req.user.id
+    });
+
+    if (transactions.length !== transactionIds.length) {
+      return res.status(403).json({ message: 'Some transactions do not belong to the user' });
+    }
+
+    // Delete all transactions
+    await Transaction.deleteMany({
+      _id: { $in: transactionIds },
+      userId: req.user.id
+    });
+
+    res.json({ message: 'Transactions deleted successfully', deletedCount: transactions.length });
+  } catch (error) {
+    console.error('Error in bulk delete:', error);
+    res.status(500).json({ message: 'Error deleting transactions' });
   }
 });
 

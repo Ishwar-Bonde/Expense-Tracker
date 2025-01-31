@@ -28,8 +28,8 @@ import {
   Filler
 } from 'chart.js';
 import { ChartPieIcon } from '@heroicons/react/24/outline';
-
 import Navbar from '../components/Navbar';
+
 import { API_BASE_URL } from '../config';
 import { fetchWithAuth } from '../utils/fetchInterceptor';
 import { CURRENCIES, convertCurrencyWithRates,getExchangeRates } from '../utils/currency';
@@ -1074,7 +1074,7 @@ function Dashboard() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar />
       <Toaster position="top-center" />
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 mt-8">
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {/* Total Balance */}
@@ -1228,7 +1228,7 @@ function Dashboard() {
             {settings.savingsGoal > 0 && (
               <div className="flex flex-col gap-1">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">Progress</span>
+                  <span>Progress</span>
                   <span className={`${monthlySavings < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
                     {Math.min(Math.round(Math.abs(monthlySavings) / settings.savingsGoal * 100), 100)}%
                   </span>
@@ -1871,7 +1871,7 @@ function Dashboard() {
                 <div className="px-4 py-6 sm:px-6">
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm text-gray-600 dark:text-gray-400 mb-2">
                         Enter your monthly savings target in INR
                       </label>
                       <div className="mt-1 relative rounded-md shadow-sm">

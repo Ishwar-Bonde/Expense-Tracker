@@ -215,9 +215,47 @@ const RecurringTransactions: React.FC = () => {
         fetchRecurringTransactions(),
         loadCategories()
       ]);
+      // Process transactions after loading them
+      await processTransactions();
     };
     loadData();
   }, []);
+
+  // Process recurring transactions
+  const processTransactions = async () => {
+    try {
+      const processPromises = recurringTransactions.map(async (transaction) => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/recurring-transactions/process/${transaction._id}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+          });
+          
+          const result = await response.json();
+          if (result.success) {
+            // Update the local state with the new next due date
+            setRecurringTransactions(prev => prev.map(t => 
+              t._id === transaction._id 
+                ? { ...t, nextDueDate: result.newNextDueDate }
+                : t
+            ));
+            toast.success(`Processed recurring transaction: ${transaction.title}`);
+          }
+        } catch (error) {
+          console.error(`Error processing transaction ${transaction._id}:`, error);
+          toast.error(`Failed to process transaction: ${transaction.title}`);
+        }
+      });
+
+      await Promise.all(processPromises);
+    } catch (error) {
+      console.error('Error processing recurring transactions:', error);
+      toast.error('Failed to process recurring transactions');
+    }
+  };
 
     // Handle transaction form submission
     const handleTransactionSubmit = async (e: React.FormEvent) => {
@@ -578,8 +616,10 @@ const RecurringTransactions: React.FC = () => {
             throw new Error('Failed to delete recurring transaction');
           }
 
-          fetchRecurringTransactions();
+          await fetchRecurringTransactions();
           setTransactionToDelete(null);
+          setShowDeleteModal(false); // Close the delete modal
+          toast.success('Recurring transaction deleted successfully');
         } catch (error) {
           console.error('Error:', error);
           toast.error('Failed to delete recurring transaction');

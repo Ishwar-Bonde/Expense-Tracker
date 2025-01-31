@@ -35,7 +35,7 @@ const recurringTransactionSchema = new mongoose.Schema({
   },
   categoryId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'RecurringCategory',
+    ref: 'Category',
     required: true
   },
   frequency: {
@@ -51,8 +51,7 @@ const recurringTransactionSchema = new mongoose.Schema({
     type: Date
   },
   lastProcessed: {
-    type: Date,
-    default: null
+    type: Date
   },
   nextDueDate: {
     type: Date,
@@ -74,9 +73,9 @@ const recurringTransactionSchema = new mongoose.Schema({
 // Calculate next due date based on frequency
 recurringTransactionSchema.methods.calculateNextDueDate = function() {
   const currentDate = this.lastProcessed || this.startDate;
-  let nextDate = new Date(currentDate);
+  const nextDate = new Date(currentDate);
 
-  switch (this.frequency) {
+  switch (this.frequency.toLowerCase()) {
     case 'daily':
       nextDate.setDate(nextDate.getDate() + 1);
       break;
@@ -91,13 +90,20 @@ recurringTransactionSchema.methods.calculateNextDueDate = function() {
       break;
   }
 
-  // If end date exists and next date is after end date, mark as inactive
-  if (this.endDate && nextDate > this.endDate) {
-    this.isActive = false;
-    return null;
-  }
-
   return nextDate;
+};
+
+// Update lastProcessed and nextDueDate
+recurringTransactionSchema.methods.updateProcessingDates = async function() {
+  const now = new Date();
+  this.lastProcessed = now;
+  this.nextDueDate = this.calculateNextDueDate();
+  
+  if (this.endDate && this.nextDueDate > this.endDate) {
+    this.isActive = false;
+  }
+  
+  return this.save();
 };
 
 const RecurringTransaction = mongoose.model('RecurringTransaction', recurringTransactionSchema);

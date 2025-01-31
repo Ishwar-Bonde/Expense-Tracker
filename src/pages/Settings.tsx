@@ -621,7 +621,7 @@ const Settings = () => {
           initial="hidden"
           animate="visible"
           variants={fadeIn}
-          className="container mx-auto px-4 py-8 max-w-4xl"
+          className="container mx-auto px-4 pt-8 max-w-4xl"
         >
           {/* Header Section */}
           <div className="text-center mb-8">

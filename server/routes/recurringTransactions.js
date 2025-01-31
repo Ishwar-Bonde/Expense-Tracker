@@ -4,6 +4,7 @@ import RecurringTransaction from '../models/RecurringTransaction.js';
 import Transaction from '../models/Transaction.js';
 import User from '../models/User.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { processRecurringTransactions, processMissedTransactions } from '../utils/recurringTransactions.js';
 import axios from 'axios';
 
 const router = express.Router();
@@ -26,6 +27,9 @@ async function convertCurrency(amount, fromCurrency, toCurrency) {
 // Get all recurring transactions for a user
 router.get('/', authenticateToken, async (req, res) => {
   try {
+    // Process any pending transactions first
+    await processMissedTransactions(req.user.id);
+    
     const user = await User.findById(req.user.id).select('defaultCurrency');
     const userCurrency = user.defaultCurrency || 'USD';
 
@@ -352,17 +356,18 @@ router.put('/:id', authenticateToken, async (req, res) => {
 // Delete a recurring transaction
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
-    const recurringTransaction = await RecurringTransaction.findOne({
-      _id: req.params.id,
-      userId: req.user.id
-    });
+    const result = await RecurringTransaction.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        userId: req.user.id
+      },
+      { isActive: false },
+      { new: true }
+    );
 
-    if (!recurringTransaction) {
+    if (!result) {
       return res.status(404).json({ message: 'Recurring transaction not found' });
     }
-
-    recurringTransaction.isActive = false;
-    await recurringTransaction.save();
     
     res.json({ message: 'Recurring transaction deleted successfully' });
   } catch (error) {
@@ -371,61 +376,51 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Process due recurring transactions
+// Process recurring transactions
 router.post('/process', authenticateToken, async (req, res) => {
   try {
-    const now = new Date();
-    const dueTransactions = await RecurringTransaction.find({
-      userId: req.user.id,
-      isActive: true,
-      nextDueDate: { $lte: now }
-    });
-
-    const processedTransactions = [];
-
-    for (const recurringTx of dueTransactions) {
-      // Create the actual transaction
-      const transaction = new Transaction({
-        userId: req.user.id,
-        type: recurringTx.type,
-        title: recurringTx.title,
-        description: recurringTx.description,
-        categoryId: recurringTx.categoryId,
-        amount: {
-          original: recurringTx.originalAmount,
-          usd: recurringTx.amount // You might want to add currency conversion here
-        },
-        currency: recurringTx.originalCurrency, // Use the original currency from the recurring transaction
-        date: recurringTx.nextDueDate,
-        isRecurring: true,
-        recurringTransactionId: recurringTx._id
-      });
-
-      await transaction.save();
-      processedTransactions.push(transaction);
-
-      // Update the recurring transaction
-      recurringTx.lastProcessed = recurringTx.nextDueDate;
-      recurringTx.nextDueDate = recurringTx.calculateNextDueDate();
-      
-      if (recurringTx.nextDueDate) {
-        await recurringTx.save();
-      } else {
-        // If no next due date (e.g., past end date), mark as inactive
-        recurringTx.isActive = false;
-        await recurringTx.save();
-      }
-    }
-
-    res.json({
-      processed: processedTransactions.length,
-      transactions: processedTransactions
-    });
+    console.log('Processing recurring transactions for user:', req.user.id);
+    const result = await processMissedTransactions(req.user.id);
+    console.log('Processing result:', result);
+    res.json(result);
   } catch (error) {
-    console.error('Error processing transactions:', error);
-    res.status(500).json({ message: error.message });
+    console.error('Error processing recurring transactions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process recurring transactions',
+      details: error.message
+    });
   }
 });
 
+// Get upcoming recurring transactions
+router.get('/upcoming', authenticateToken, async (req, res) => {
+  try {
+    // First process any pending transactions
+    await processMissedTransactions(req.user.id);
+    
+    const now = new Date();
+    const thirtyDaysFromNow = new Date(now);
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+    const transactions = await RecurringTransaction.find({
+      userId: req.user.id,
+      isActive: true,
+      nextDueDate: {
+        $gte: now,
+        $lte: thirtyDaysFromNow
+      }
+    }).sort({ nextDueDate: 1 });
+
+    res.json(transactions);
+  } catch (error) {
+    console.error('Error fetching upcoming transactions:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch upcoming transactions',
+      details: error.message
+    });
+  }
+});
 
 export default router;

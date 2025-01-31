@@ -14,13 +14,12 @@ const router = express.Router();
 async function getPrediction(income, expenses, month, savings) {
   return new Promise((resolve, reject) => {
     const scriptPath = join(__dirname, '..', 'ml', 'expense_predictor.py');
+    const pythonPath = join(__dirname, '..', 'ml', 'ml_env', 'Scripts', 'python.exe');
+    
     console.log('Running Python script:', scriptPath);
+    console.log('Using Python path:', pythonPath);
     
-    // Use 'python3' on Linux (Render) and 'py' on Windows
-    const pythonCommand = process.platform === 'win32' ? 'py' : 'python3';
-    console.log('Using Python command:', pythonCommand);
-    
-    const pythonProcess = spawn(pythonCommand, [
+    const pythonProcess = spawn(pythonPath, [
       scriptPath,
       income.toString(),
       expenses.toString(),

@@ -14,6 +14,8 @@ import toast from 'react-hot-toast';
 import { API_BASE_URL } from '../config';
 import { fetchCategories, Category, DEFAULT_CATEGORIES } from '../utils/categories';
 import Modal from '../components/Modal';
+import { Checkbox } from '../components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 
 interface Transaction {
   _id: string;
@@ -75,6 +77,7 @@ const Transactions: React.FC = () => {
     start: '',
     end: ''
   });
+  const [selectedTransactions, setSelectedTransactions] = useState<string[]>([]);
   const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
   const [selectedType, setSelectedType] = useState<TransactionType>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -86,6 +89,9 @@ const Transactions: React.FC = () => {
   const [isImportLoading, setIsImportLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [selectAll, setSelectAll] = useState(false);
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
+  const [showSingleDeleteDialog, setShowSingleDeleteDialog] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -280,6 +286,7 @@ const Transactions: React.FC = () => {
   // Delete transaction handlers
   const handleDeleteClick = (transaction: Transaction) => {
     setTransactionToDelete(transaction);
+    setShowSingleDeleteDialog(true);
   };
 
   const handleDeleteConfirm = async () => {
@@ -306,6 +313,7 @@ const Transactions: React.FC = () => {
       if (response.ok && data.status === 'success') {
         setTransactions(prev => prev.filter(t => t._id !== transactionToDelete._id));
         toast.success('Transaction deleted successfully');
+        setShowSingleDeleteDialog(false);
         setTransactionToDelete(null);
       } else {
         toast.error(data.message || 'Failed to delete transaction');
@@ -317,7 +325,60 @@ const Transactions: React.FC = () => {
   };
 
   const handleDeleteCancel = () => {
+    setShowSingleDeleteDialog(false);
     setTransactionToDelete(null);
+  };
+
+  const handleBulkDeleteClick = () => {
+    if (selectedTransactions.length === 0) {
+      toast.error('No transactions selected');
+      return;
+    }
+    setShowBulkDeleteDialog(true);
+  };
+
+  const handleBulkDelete = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/transactions/bulk-delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ transactionIds: selectedTransactions })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // Immediately update the UI by filtering out deleted transactions
+        setTransactions(prevTransactions => 
+          prevTransactions.filter(t => !selectedTransactions.includes(t._id))
+        );
+        
+        // Clear selections
+        setSelectedTransactions([]);
+        setSelectAll(false);
+        
+        // Show success message
+        toast.success(`Successfully deleted ${data.deletedCount} transactions`, {
+          icon: '✅',
+          style: {
+            borderRadius: '10px',
+            background: '#333',
+            color: '#fff',
+          },
+        });
+      } else {
+        throw new Error(data.message || 'Failed to delete transactions');
+      }
+    } catch (error) {
+      console.error('Error deleting transactions:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to delete transactions');
+    } finally {
+      setIsLoading(false);
+      setShowBulkDeleteDialog(false);
+    }
   };
 
   // Format transaction amount
@@ -329,6 +390,18 @@ const Transactions: React.FC = () => {
   const getCategoryName = (categoryId: string) => {
     const category = categories.find(cat => cat.id === categoryId);
     return category ? category.name : 'Other';
+  };
+
+  // Get category color function
+  const getCategoryColor = (categoryId: string) => {
+    const category = [...DEFAULT_CATEGORIES, ...categories].find(cat => cat.id === categoryId);
+    return category?.color || '#718096';
+  };
+
+  // Get category icon function
+  const getCategoryIcon = (categoryId: string) => {
+    const category = [...DEFAULT_CATEGORIES, ...categories].find(cat => cat.id === categoryId);
+    return category?.icon || '📦';
   };
 
   // Function to handle CSV export
@@ -352,7 +425,7 @@ const Transactions: React.FC = () => {
       [headers.type]: t.type,
       [headers.currency]: t.currency,
       [headers.description]: t.description || '',
-      [headers.category]: categories.find(c => c.id === t.categoryId)?.name || 'Uncategorized'
+      [headers.category]: getCategoryName(t.categoryId)
     }));
 
     return data;
@@ -731,6 +804,30 @@ const Transactions: React.FC = () => {
     doc.save('transactions.pdf');
   };
 
+  const handleRowSelect = (transactionId: string) => {
+    setSelectedTransactions(prev => {
+      const isSelected = prev.includes(transactionId);
+      const newSelection = isSelected
+        ? prev.filter(id => id !== transactionId)
+        : [...prev, transactionId];
+      
+      // Update selectAll state based on whether all visible transactions are selected
+      setSelectAll(newSelection.length === filteredAndSortedTransactions.length);
+      
+      return newSelection;
+    });
+  };
+
+  const handleSelectAll = () => {
+    setSelectAll(!selectAll);
+    setSelectedTransactions(selectAll ? [] : filteredAndSortedTransactions.map(t => t._id));
+  };
+
+  useEffect(() => {
+    setSelectedTransactions([]);
+    setSelectAll(false);
+  }, [transactions]);
+
   if (isLoading) return <Loading />;
 
   return (
@@ -987,6 +1084,18 @@ const Transactions: React.FC = () => {
                 Clear Filters
               </button>
             )}
+
+            {/* Bulk Delete */}
+            {selectedTransactions.length > 0 && (
+              <button
+                onClick={handleBulkDeleteClick}
+                disabled={isLoading}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-400 bg-red-900/30 rounded-lg hover:bg-red-900/50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Selected ({selectedTransactions.length})
+              </button>
+            )}
           </div>
 
           {/* Date Filter Inputs */}
@@ -1089,7 +1198,9 @@ const Transactions: React.FC = () => {
                 <ArrowUpDown className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500" />
               </div>
               <h3 className="text-xl font-medium text-gray-900 dark:text-white mb-2">No Transactions Yet</h3>
-              <p className="text-gray-600 dark:text-gray-400">Start adding your income and expenses to track them here.</p>
+              <p className="text-gray-600 dark:text-gray-400 text-center mb-4">
+                Start adding your income and expenses to track them here.
+              </p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -1098,6 +1209,13 @@ const Transactions: React.FC = () => {
                   <table className="min-w-full table-fixed divide-y divide-gray-200 dark:divide-gray-700">
                     <thead className="bg-gray-50 dark:bg-gray-800">
                       <tr>
+                        <th scope="col" className="w-[5%] px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          <Checkbox
+                            checked={selectAll}
+                            onCheckedChange={handleSelectAll}
+                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:checked:bg-indigo-600"
+                          />
+                        </th>
                         <th scope="col" className="w-[12%] px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                           Date
                         </th>
@@ -1125,8 +1243,19 @@ const Transactions: React.FC = () => {
                       {filteredAndSortedTransactions.map((transaction) => (
                         <tr 
                           key={transaction._id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors duration-150"
+                          className={`${
+                            selectedTransactions.includes(transaction._id) 
+                              ? 'bg-indigo-50 dark:bg-indigo-900/20' 
+                              : 'bg-white dark:bg-gray-900'
+                          } hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors duration-200`}
                         >
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Checkbox
+                              checked={selectedTransactions.includes(transaction._id)}
+                              onCheckedChange={() => handleRowSelect(transaction._id)}
+                              className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-700 dark:checked:bg-indigo-600"
+                            />
+                          </td>
                           <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 truncate">
                             {new Date(transaction.date).toLocaleDateString('en-US', {
                               year: 'numeric',
@@ -1152,11 +1281,15 @@ const Transactions: React.FC = () => {
                             </div>
                           </td>
                           <td className="px-6 py-4">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium truncate ${
-                              transaction.type === 'income'
-                                ? 'bg-green-100 dark:bg-green-900/30 text-green-400 border border-green-700/50' 
-                                : 'bg-red-100 dark:bg-red-900/30 text-red-400 border border-red-700/50'
-                            }`}>
+                            <span 
+                              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium truncate"
+                              style={{
+                                backgroundColor: `${getCategoryColor(transaction.categoryId)}15`,
+                                color: getCategoryColor(transaction.categoryId),
+                                borderColor: `${getCategoryColor(transaction.categoryId)}30`
+                              }}
+                            >
+                              <span className="mr-1">{getCategoryIcon(transaction.categoryId)}</span>
                               {getCategoryName(transaction.categoryId)}
                             </span>
                           </td>
@@ -1170,7 +1303,7 @@ const Transactions: React.FC = () => {
                           <td className="px-6 py-4 text-sm text-gray-500">
                             <button
                               onClick={() => handleDeleteClick(transaction)}
-                              className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 transition-colors duration-150"
+                              className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
                             >
                               <Trash2 className="w-5 h-5" />
                             </button>
@@ -1186,20 +1319,21 @@ const Transactions: React.FC = () => {
         </div>
       </div>
 
-      {/* Delete Confirmation Modal */}
-      {transactionToDelete && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 transform transition-all">
-            <div className="flex items-center justify-center mb-4 text-red-500">
-              <AlertTriangle className="w-12 h-12" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white text-center mb-2">
+      {/* Single Transaction Delete Dialog */}
+      <Dialog open={showSingleDeleteDialog} onOpenChange={setShowSingleDeleteDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-semibold flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-500" />
               Delete Transaction
-            </h3>
-            <p className="text-gray-600 dark:text-gray-400 text-center mb-4">
+            </DialogTitle>
+            <DialogDescription className="text-gray-500 dark:text-gray-400">
               Are you sure you want to delete this transaction? This action cannot be undone.
-            </p>
-            <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg mb-4">
+            </DialogDescription>
+          </DialogHeader>
+          
+          {transactionToDelete && (
+            <div className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg my-4">
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-gray-600 dark:text-gray-400">Title:</p>
@@ -1208,8 +1342,8 @@ const Transactions: React.FC = () => {
                 <div>
                   <p className="text-gray-600 dark:text-gray-400">Amount:</p>
                   <p className={`font-medium ${
-                    transactionToDelete.type === 'income' 
-                      ? 'text-green-600 dark:text-green-400' 
+                    transactionToDelete.type === 'income'
+                      ? 'text-green-600 dark:text-green-400'
                       : 'text-red-600 dark:text-red-400'
                   }`}>
                     {transactionToDelete.type === 'income' ? '+' : '-'} {formatTransactionAmount(transactionToDelete)}
@@ -1227,23 +1361,62 @@ const Transactions: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end space-x-3">
-              <button
-                onClick={handleDeleteCancel}
-                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 dark:text-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDeleteConfirm}
-                className="px-4 py-2 text-white bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700 rounded-lg transition-colors"
-              >
-                Delete
-              </button>
-            </div>
+          )}
+
+          <div className="flex justify-end gap-3 mt-6">
+            <button
+              onClick={handleDeleteCancel}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDeleteConfirm}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:bg-red-700 dark:hover:bg-red-600"
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete
+            </button>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-semibold">Confirm Bulk Delete</DialogTitle>
+            <DialogDescription className="text-gray-500 dark:text-gray-400">
+              Are you sure you want to delete {selectedTransactions.length} selected transaction{selectedTransactions.length !== 1 ? 's' : ''}? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3 mt-6">
+            <button
+              onClick={() => setShowBulkDeleteDialog(false)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleBulkDelete}
+              disabled={isLoading}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:bg-red-700 dark:hover:bg-red-600"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-4 h-4" />
+                  Delete
+                </>
+              )}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Import Modal */}
       {showImportModal && (

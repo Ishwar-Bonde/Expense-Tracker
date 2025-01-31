@@ -6,9 +6,21 @@ interface ModalProps {
   title: string;
   children: React.ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  onConfirm?: () => void;
+  confirmText?: string;
+  confirmStyle?: 'primary' | 'danger' | 'success' | 'warning';
 }
 
-const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 'md' }) => {
+const Modal: React.FC<ModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  title, 
+  children, 
+  size = 'md',
+  onConfirm,
+  confirmText,
+  confirmStyle = 'primary'
+}) => {
   if (!isOpen) return null;
 
   const sizeClasses = {
@@ -16,6 +28,13 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
     md: 'max-w-md',
     lg: 'max-w-lg',
     xl: 'max-w-2xl'
+  };
+
+  const styleClasses = {
+    primary: 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500',
+    danger: 'bg-red-600 hover:bg-red-700 focus:ring-red-500',
+    success: 'bg-green-600 hover:bg-green-700 focus:ring-green-500',
+    warning: 'bg-yellow-600 hover:bg-yellow-700 focus:ring-yellow-500'
   };
 
   return (
@@ -41,6 +60,24 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
           <div className="p-6">
             {children}
           </div>
+
+          {/* Footer with Confirm Button */}
+          {onConfirm && confirmText && (
+            <div className="flex justify-end gap-3 border-t border-gray-700 px-6 py-4">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white focus:outline-none"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onConfirm}
+                className={`rounded-lg px-4 py-2 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 ${styleClasses[confirmStyle]}`}
+              >
+                {confirmText}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

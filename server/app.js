@@ -1,26 +1,52 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const cron = require('node-cron');
-const { processRecurringTransactions } = require('./utils/recurringTransactions');
+import express from 'express';
+import mongoose from 'mongoose';
+import cors from 'cors';
+import nodeCron from 'node-cron';
+import { processRecurringTransactions } from './utils/recurringTransactions.js';
+import transactionsRouter from './routes/transactions.js';
+import categoriesRouter from './routes/categories.js';
+import recurringTransactionsRouter from './routes/recurringTransactions.js';
+import usersRouter from './routes/users.js';
+import settingsRouter from './routes/settings.js';
+import insightsRouter from './routes/insights.js';
+import loansRouter from './routes/loans.js';
+import testRouter from './routes/test.js';
 
 const app = express();
 
+// Configure CORS
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://192.168.0.102:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Enable pre-flight requests for all routes
+app.options('*', cors());
+
 // Middleware
-app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
 // Routes
-app.use('/api/transactions', require('./routes/transactions'));
-app.use('/api/categories', require('./routes/categories'));
-app.use('/api/recurring-transactions', require('./routes/recurringTransactions'));
-app.use('/api/users', require('./routes/users'));
-app.use('/api/settings', require('./routes/settings'));
-app.use('/api/insights', require('./routes/insights'));
+app.use('/api/transactions', transactionsRouter);
+app.use('/api/categories', categoriesRouter);
+app.use('/api/recurring-transactions', recurringTransactionsRouter);
+app.use('/api/users', usersRouter);
+app.use('/api/settings', settingsRouter);
+app.use('/api/insights', insightsRouter);
+app.use('/api/loans', loansRouter);
+app.use('/api/test', testRouter);
 
 // Schedule recurring transactions processing
 // Run every hour
-cron.schedule('0 * * * *', async () => {
+nodeCron.schedule('0 * * * *', async () => {
   try {
     console.log('Processing recurring transactions...');
     const users = await mongoose.model('User').find({});
@@ -41,4 +67,4 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: 'Something went wrong!' });
 });
 
-module.exports = app;
+export default app;
