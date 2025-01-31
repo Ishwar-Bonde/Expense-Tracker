@@ -71,6 +71,10 @@ cd server/ml
 python -m venv ml_env
 source ml_env/bin/activate  # On Windows: ml_env\Scripts\activate
 pip install -r requirements.txt
+
+or
+# Can be used directly global python interpreter
+pip install -r requirements.txt
 ```
 
 4. **Configure environment variables**
