@@ -17,7 +17,7 @@ import notificationsRoutes, { createRecurringNotifications } from './routes/noti
 import loansRoutes from './routes/loans.js';
 import documentsRoutes from './routes/documents.js';
 import Transaction from './models/Transaction.js';
-import { API_FRONTEND_URL } from './config.js';
+import { API_URL_FRONTEND } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,7 +26,7 @@ const app = express();
 
 // Configure CORS with specific options
 app.use(cors({
-  origin: [API_FRONTEND_URL],
+  origin: [API_URL_FRONTEND],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']

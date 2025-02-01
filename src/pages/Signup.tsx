@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { fadeIn, formItemAnimation, buttonAnimation } from '../utils/animations';
 import toast from 'react-hot-toast';
 import { API_BASE_URL } from '../config';
+import { applyTheme } from '../utils/theme';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'INR'];
 
@@ -47,10 +48,21 @@ function Signup() {
       
       if (response.ok) {
         setSuccess(true);
+        // Store auth data
         localStorage.setItem('token', data.token);
+        localStorage.setItem('refreshToken', data.refreshToken);
         localStorage.setItem('user', JSON.stringify(data.user));
+        
+        // Set token expiry time (24 hours from now, matching backend token expiry)
+        const expiryTime = new Date();
+        expiryTime.setHours(expiryTime.getHours() + 24);
+        localStorage.setItem('tokenExpiry', expiryTime.toISOString());
+
+        // Apply default theme
+        applyTheme('light');
+        
         toast.success('Account created successfully!');
-        navigate('/dashboard');
+        navigate('/dashboard', { replace: true });
       } else {
         const errorMessage = data.details || data.message || 'Signup failed';
         setError(errorMessage);
@@ -145,7 +157,7 @@ function Signup() {
                 required
                 value={formData.firstName}
                 onChange={handleChange}
-                className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+                className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 text-gray-900"
               />
             </motion.div>
 
@@ -160,7 +172,7 @@ function Signup() {
                 required
                 value={formData.lastName}
                 onChange={handleChange}
-                className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+                className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 text-gray-900"
               />
             </motion.div>
           </div>
@@ -176,7 +188,7 @@ function Signup() {
               required
               value={formData.email}
               onChange={handleChange}
-              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 text-gray-900"
             />
           </motion.div>
 
@@ -192,7 +204,7 @@ function Signup() {
               minLength={6}
               value={formData.password}
               onChange={handleChange}
-              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 text-gray-900"
             />
           </motion.div>
 
@@ -205,7 +217,7 @@ function Signup() {
               name="defaultCurrency"
               value={formData.defaultCurrency}
               onChange={handleChange}
-              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 text-gray-900"
             >
               {CURRENCIES.map(currency => (
                 <option key={currency} value={currency}>{currency}</option>

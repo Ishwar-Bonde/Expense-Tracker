@@ -168,7 +168,7 @@ function Login() {
               required
               value={formData.email}
               onChange={handleChange}
-              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 text-gray-900"
               placeholder="your@email.com"
             />
           </motion.div>
@@ -184,7 +184,7 @@ function Login() {
               required
               value={formData.password}
               onChange={handleChange}
-              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200"
+              className="block w-full px-4 py-3 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 text-gray-900"
               placeholder="••••••••"
             />
           </motion.div>

@@ -11,13 +11,13 @@ import settingsRouter from './routes/settings.js';
 import insightsRouter from './routes/insights.js';
 import loansRouter from './routes/loans.js';
 import testRouter from './routes/test.js';
-import { API_FRONTEND_URL } from './config.js';
+import { API_URL_FRONTEND } from './config.js';
 
 const app = express();
 
 // Configure CORS
 app.use(cors({
-  origin: [API_FRONTEND_URL],
+  origin: [API_URL_FRONTEND],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']

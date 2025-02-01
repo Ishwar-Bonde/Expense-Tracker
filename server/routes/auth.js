@@ -161,16 +161,30 @@ router.post('/signup', async (req, res) => {
       }
     );
 
+    // Create new session for the user
+    const deviceInfo = req.headers['user-agent'] || 'Unknown Device';
+    const session = new Session({
+      userId: user._id,
+      token,
+      deviceInfo,
+      isActive: true,
+      lastActivity: new Date()
+    });
+    await session.save();
+
+    // Format user data consistently with login route
+    const userWithoutPassword = {
+      id: user._id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      defaultCurrency: user.defaultCurrency
+    };
+
     res.status(201).json({
       token,
       refreshToken,
-      user: {
-        id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        defaultCurrency: user.defaultCurrency
-      },
+      user: userWithoutPassword,
       message: 'User created successfully'
     });
   } catch (error) {
