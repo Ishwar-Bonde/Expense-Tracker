@@ -14,7 +14,7 @@ const router = express.Router();
 async function getPrediction(income, expenses, month, savings) {
   return new Promise((resolve, reject) => {
     const scriptPath = join(__dirname, '..', 'ml', 'expense_predictor.py');
-    const pythonPath = join(__dirname, '..', 'ml', 'ml_env', 'Scripts', 'python.exe');
+    const pythonPath = 'python';
     
     console.log('Running Python script:', scriptPath);
     console.log('Using Python path:', pythonPath);
