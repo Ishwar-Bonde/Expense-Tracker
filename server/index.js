@@ -37,6 +37,7 @@ import groupTransactionsRouter from './routes/groupTransactions.js';
 import groupCategoriesRouter from './routes/groupCategories.js';
 
 const app = express();
+console.log('Frontend Origin from env:', API_URL_FRONTEND);
 
 // Configure CORS with specific options
 app.use(cors({
