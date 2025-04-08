@@ -21,7 +21,7 @@ import notificationsRoutes, { createRecurringNotifications } from './routes/noti
 import loansRoutes from './routes/loans.js';
 import documentsRoutes from './routes/documents.js';
 import Transaction from './models/Transaction.js';
-import { API_URL_FRONTEND } from './config.js';
+import { API_URL_FRONTEND, ALLOWED_ORIGINS } from './config.js';
 import chatbotRoutes from './routes/chatbot.js';
 import authRoutes from './routes/auth.js';
 import transactionRoutes from './routes/transactions.js';
