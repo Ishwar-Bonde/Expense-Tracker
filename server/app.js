@@ -16,6 +16,7 @@ import authRouter from './routes/auth.js';
 import { API_URL_FRONTEND, ALLOWED_ORIGINS } from './config.js';
 
 const app = express();
+console.log('Frontend Origin from env:', API_URL_FRONTEND);
 
 // Configure CORS
 app.use(cors({
