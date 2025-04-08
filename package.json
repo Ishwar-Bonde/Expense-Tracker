@@ -69,7 +69,7 @@
     "tailwind-merge": "^2.6.0",
     "validator": "^13.12.0",
     "zod": "^3.22.4",
-    "openai": "^4.39.0"
+    "openai": "^4.92.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
