@@ -50,10 +50,23 @@ export const authenticateToken = async (req, res, next) => {
             { $set: { lastActivity: new Date() }}
         );
 
-        req.user = { id: decoded.userId };
+        // Set user info in request
+        req.user = {
+            id: decoded.userId, // Add id property
+            userId: decoded.userId // Keep userId for backward compatibility
+        };
+        
         req.session = latestSession;
         next();
     } catch (error) {
+        if (error.name === 'JsonWebTokenError') {
+            return res.status(401).json({
+                isValid: false,
+                message: 'Invalid token format',
+                error: 'INVALID_TOKEN'
+            });
+        }
+        
         if (error.name === 'TokenExpiredError') {
             return res.status(401).json({
                 isValid: false,
@@ -61,11 +74,12 @@ export const authenticateToken = async (req, res, next) => {
                 error: 'TOKEN_EXPIRED'
             });
         }
-        console.error('Auth error:', error);
-        return res.status(401).json({ 
+
+        console.error('Auth middleware error:', error);
+        return res.status(500).json({
             isValid: false,
-            message: 'Invalid token',
-            error: 'TOKEN_INVALID'
+            message: 'Internal server error during authentication',
+            error: 'AUTH_ERROR'
         });
     }
 };

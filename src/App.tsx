@@ -10,16 +10,17 @@ import AddExpense from './pages/AddExpense';
 import Settings from './pages/Settings';
 import RecurringTransactions from './pages/RecurringTransactions';
 import Predictions from './pages/Predictions';
+import Groups from './pages/Groups';
 import { Toaster } from 'react-hot-toast';
 import PrivateRoute from './components/PrivateRoute';
 import Intro from './pages/Intro';
-import LoansPage from './pages/Loans';
 import LoanCalculatorPage from './pages/Loans/Calculator';
 import LoanComparePage from './pages/Loans/Compare';
 import NewLoanPage from './pages/Loans/New';
 import { getCurrentTheme, applyTheme } from './utils/theme';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
+import Loans from './components/Loans/Loans';
 
 const router = createBrowserRouter(
   createRoutesFromElements(
@@ -34,7 +35,8 @@ const router = createBrowserRouter(
       <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
       <Route path="/recurring" element={<PrivateRoute><RecurringTransactions /></PrivateRoute>} />
       <Route path="/predictions" element={<PrivateRoute><Predictions /></PrivateRoute>} />
-      <Route path="/loans" element={<PrivateRoute><LoansPage /></PrivateRoute>} />
+      <Route path="/groups" element={<PrivateRoute><Groups /></PrivateRoute>} />
+      <Route path="/loans" element={<PrivateRoute><Loans /></PrivateRoute>} />
       <Route path="/loans/new" element={<PrivateRoute><NewLoanPage /></PrivateRoute>} />
       <Route path="/loans/calculator" element={<PrivateRoute><LoanCalculatorPage /></PrivateRoute>} />
       <Route path="/loans/compare" element={<PrivateRoute><LoanComparePage /></PrivateRoute>} />

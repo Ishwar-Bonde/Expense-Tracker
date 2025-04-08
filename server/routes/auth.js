@@ -42,7 +42,10 @@ router.post('/login', async (req, res) => {
     );
 
     // Get device info
-    const deviceInfo = req.headers['user-agent'] || 'Unknown Device';
+    const deviceInfo = {
+      userAgent: req.headers['user-agent'] || 'Unknown Device',
+      ip: req.ip || req.connection.remoteAddress || 'Unknown IP'
+    };
 
     // Deactivate all other sessions for this user
     await Session.updateMany(
@@ -162,7 +165,11 @@ router.post('/signup', async (req, res) => {
     );
 
     // Create new session for the user
-    const deviceInfo = req.headers['user-agent'] || 'Unknown Device';
+    const deviceInfo = {
+      userAgent: req.headers['user-agent'] || 'Unknown Device',
+      ip: req.ip || req.connection.remoteAddress || 'Unknown IP'
+    };
+    
     const session = new Session({
       userId: user._id,
       token,

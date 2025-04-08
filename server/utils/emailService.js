@@ -1,6 +1,10 @@
+import express from 'express';
+import mongoose from 'mongoose';
 import nodemailer from 'nodemailer';
-import dotenv from 'dotenv';
+import Transaction from '../models/Transaction.js';
 import { getFinancialInsights } from './financialInsights.js';
+import dotenv from 'dotenv';
+import User from '../models/User.js';
 
 // Ensure environment variables are loaded
 dotenv.config();
@@ -8,29 +12,37 @@ dotenv.config();
 // Create email transporter with retry mechanism
 const createTransporter = () => {
   console.log('Creating email transporter...');
-  console.log('Email User:', process.env.EMAIL_USER);
-  console.log('Email Password exists:', !!process.env.EMAIL_PASSWORD);
   
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.error('Email configuration missing. Please set EMAIL_USER and EMAIL_PASSWORD in .env file');
+    console.error('Email configuration missing:');
+    console.error('EMAIL_USER exists:', !!process.env.EMAIL_USER);
+    console.error('EMAIL_PASSWORD exists:', !!process.env.EMAIL_PASSWORD);
     return null;
   }
 
   try {
+    console.log('Attempting to create transporter with:', {
+      user: process.env.EMAIL_USER,
+      passwordExists: !!process.env.EMAIL_PASSWORD
+    });
+
     const transport = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true, // use SSL
+      service: 'gmail',  // Using Gmail service instead of manual SMTP config
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASSWORD
-      },
-      tls: {
-        // do not fail on invalid certs
-        rejectUnauthorized: false
       }
     });
-    console.log('Email transporter created successfully');
+
+    // Verify the connection
+    transport.verify((error, success) => {
+      if (error) {
+        console.error('Email transporter verification failed:', error);
+      } else {
+        console.log('Email transporter is ready to send emails');
+      }
+    });
+
     return transport;
   } catch (error) {
     console.error('Error creating email transporter:', error);
@@ -40,12 +52,17 @@ const createTransporter = () => {
 
 const transporter = createTransporter();
 
-// Email queue to handle rate limiting and failures
-const emailQueue = [];
+// Email queue and processing flag
+let emailQueue = [];
 let isProcessingQueue = false;
 
 // Add email to queue
 const queueEmail = async (mailOptions) => {
+  console.log('Queueing email:', {
+    to: mailOptions.to,
+    subject: mailOptions.subject
+  });
+  
   emailQueue.push(mailOptions);
   if (!isProcessingQueue) {
     processEmailQueue();
@@ -63,7 +80,14 @@ const processEmailQueue = async () => {
   const mailOptions = emailQueue.shift();
 
   try {
+    console.log('Processing email from queue:', {
+      to: mailOptions.to,
+      subject: mailOptions.subject
+    });
+    
     await sendEmailWithRetry(mailOptions);
+    console.log('Email sent successfully');
+    
     // Wait 1 second before sending next email to avoid rate limiting
     setTimeout(() => processEmailQueue(), 1000);
   } catch (error) {
@@ -72,6 +96,7 @@ const processEmailQueue = async () => {
     if (!mailOptions.retryCount || mailOptions.retryCount < 3) {
       mailOptions.retryCount = (mailOptions.retryCount || 0) + 1;
       mailOptions.nextRetry = Date.now() + (Math.pow(2, mailOptions.retryCount) * 1000);
+      console.log(`Requeueing email for retry #${mailOptions.retryCount}`);
       emailQueue.push(mailOptions);
     } else {
       console.error('Max retries reached for email:', mailOptions);
@@ -294,146 +319,282 @@ function generateInsightSection(insights) {
   `;
 }
 
-export async function sendRecurringTransactionWarning(user, transactions) {
-  if (!user || !user.email) {
-    console.error('No user email provided for recurring transaction warning');
-    return;
-  }
-
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: user.email,
-    subject: 'Upcoming Recurring Transactions',
-    html: `
-      <h2>Upcoming Recurring Transactions</h2>
-      <p>Hello ${user.firstName},</p>
-      <p>You have the following recurring transactions coming up:</p>
-      <ul>
-        ${transactions.map(tx => `
-          <li>
-            <strong>${tx.title}</strong><br>
-            Amount: ${formatCurrency(tx.amount, tx.currency)}<br>
-            Due Date: ${new Date(tx.nextDueDate).toLocaleDateString()}<br>
-            Type: ${tx.type}
-          </li>
-        `).join('')}
-      </ul>
-      <p>Best regards,<br>Your Expense Tracker Team</p>
-    `
-  };
-
-  try {
-    await queueEmail(mailOptions);
-  } catch (error) {
-    console.error('Error sending recurring transaction warning:', error);
-  }
-}
-
-export async function sendRecurringTransactionConfirmation(user, transactions) {
-  if (!user || !user.email) {
-    console.error('No user email provided for recurring transaction confirmation');
-    return;
-  }
-
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: user.email,
-    subject: 'Recurring Transaction Processed',
-    html: `
-      <h2>Recurring Transaction Update</h2>
-      <p>Hello ${user.firstName},</p>
-      <p>The following recurring transactions have been processed:</p>
-      <ul>
-        ${transactions.map(tx => `
-          <li>
-            <strong>${tx.title}</strong><br>
-            Amount: ${formatCurrency(tx.amount, tx.currency)}<br>
-            Date: ${new Date(tx.date).toLocaleDateString()}<br>
-            Type: ${tx.type}
-          </li>
-        `).join('')}
-      </ul>
-      <p>Best regards,<br>Your Expense Tracker Team</p>
-    `
-  };
-
-  try {
-    await queueEmail(mailOptions);
-  } catch (error) {
-    console.error('Error sending recurring transaction confirmation:', error);
-  }
-}
-
-export async function sendLoanPaymentReminder(user, loan) {
-  const daysUntilDue = Math.ceil((loan.nextPaymentDate - new Date()) / (1000 * 60 * 60 * 24));
+// Function to get category details
+function getCategoryDetails(categoryId, userCategories = []) {
+  if (!categoryId) return { name: 'Uncategorized', color: '#718096', icon: '📦' };
   
-  const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #2c3e50;">💰 Loan Payment Reminder</h2>
-      <p>Hello ${user.name || user.email},</p>
-      
-      <div style="background-color: #fff3cd; color: #856404; padding: 15px; border-radius: 5px; margin: 20px 0;">
-        <p style="margin: 0;">Your loan payment for <strong>${loan.title}</strong> is due in ${daysUntilDue} days.</p>
-      </div>
+  // Handle both populated and unpopulated categoryId
+  const id = typeof categoryId === 'object' ? categoryId._id : categoryId;
+  const category = userCategories.find(cat => cat._id.toString() === id.toString());
+  
+  if (category) {
+    return {
+      name: category.name,
+      color: category.color,
+      icon: category.icon
+    };
+  }
+  
+  // If category is populated but not in user's categories
+  if (typeof categoryId === 'object') {
+    return {
+      name: categoryId.name,
+      color: categoryId.color,
+      icon: categoryId.icon
+    };
+  }
+  
+  return { name: 'Uncategorized', color: '#718096', icon: '📦' };
+}
 
-      <div style="background: white; border: 1px solid #e1e1e1; border-radius: 5px; padding: 20px; margin: 20px 0;">
-        <h3 style="color: #34495e; margin-top: 0;">Payment Details</h3>
-        
-        <table style="width: 100%; border-collapse: collapse;">
-          <tr>
-            <td style="padding: 8px 0;">Payment Amount:</td>
-            <td style="padding: 8px 0; text-align: right; font-weight: bold;">
-              ${formatCurrency(loan.installmentAmount, loan.currency)}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;">Due Date:</td>
-            <td style="padding: 8px 0; text-align: right;">
-              ${loan.nextPaymentDate.toLocaleDateString()}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;">Remaining Balance:</td>
-            <td style="padding: 8px 0; text-align: right;">
-              ${formatCurrency(loan.remainingAmount, loan.currency)}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0;">Loan Type:</td>
-            <td style="padding: 8px 0; text-align: right; text-transform: capitalize;">
-              ${loan.type}
-            </td>
-          </tr>
-        </table>
+// Function to generate transaction email template
+async function generateTransactionEmailTemplate(user, transaction, isUpcoming = false) {
+  console.log('=== Email Template Financial Data ===');
+  console.log('Transaction:', {
+    id: transaction._id,
+    type: transaction.type,
+    amount: transaction.amount,
+    currency: transaction.currency,
+    isRecurring: transaction.isRecurring,
+    date: transaction.date
+  });
 
-        ${loan.contact ? `
-          <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e1e1e1;">
-            <h4 style="color: #34495e; margin-top: 0;">Contact Information</h4>
-            <p style="margin: 5px 0;">Name: ${loan.contact.name}</p>
-            ${loan.contact.phone ? `<p style="margin: 5px 0;">Phone: ${loan.contact.phone}</p>` : ''}
-            ${loan.contact.email ? `<p style="margin: 5px 0;">Email: ${loan.contact.email}</p>` : ''}
-          </div>
-        ` : ''}
-      </div>
+  // Get all transactions up to this transaction's date
+  const transactionDate = new Date(transaction.date);
+  const startOfMonth = new Date(transactionDate.getFullYear(), transactionDate.getMonth(), 1);
+  const endOfMonth = new Date(transactionDate.getFullYear(), transactionDate.getMonth() + 1, 0, 23, 59, 59, 999);
 
-      <div style="margin-top: 20px;">
-        <p style="color: #666;">
-          To view complete loan details or make a payment, please log in to your Expense Tracker account.
+  console.log('Calculating totals up to:', transactionDate);
+
+  const allMonthlyTransactions = await Transaction.find({
+    userId: user._id,
+    date: { 
+      $gte: startOfMonth,
+      $lte: transactionDate
+    }
+  }).sort({ date: 1 }).select('amount type title date');
+
+  console.log('All Monthly Transactions:', JSON.stringify(allMonthlyTransactions.map(t => ({
+    id: t._id,
+    title: t.title,
+    type: t.type,
+    amount: t.amount,
+    date: t.date
+  })), null, 2));
+
+  // Calculate monthly totals up to this transaction
+  const monthlyIncome = allMonthlyTransactions
+    .filter(t => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const monthlyExpenses = allMonthlyTransactions
+    .filter(t => t.type === 'expense')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  console.log('Monthly Totals:', {
+    income: monthlyIncome,
+    expenses: monthlyExpenses,
+    upToDate: transactionDate
+  });
+
+  // Get all transactions for total balance up to this transaction
+  const allTransactions = await Transaction.find({
+    userId: user._id,
+    date: { $lte: transactionDate }
+  }).sort({ date: 1 }).select('amount type date');
+
+  // Calculate total balance up to this transaction
+  const totalIncome = allTransactions
+    .filter(t => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const totalExpenses = allTransactions
+    .filter(t => t.type === 'expense')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const currentBalance = totalIncome - totalExpenses;
+
+  // Calculate remaining balance after this transaction
+  const remainingBalance = transaction.type === 'expense' 
+    ? currentBalance - transaction.amount 
+    : currentBalance;
+
+  console.log('Balance Calculations:', {
+    totalIncome,
+    totalExpenses,
+    currentBalance,
+    remainingBalance,
+    transactionAmount: transaction.amount,
+    transactionType: transaction.type
+  });
+
+  // Format amounts
+  const formattedAmount = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: transaction.currency
+  }).format(transaction.amount);
+
+  const formattedIncome = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: transaction.currency
+  }).format(monthlyIncome);
+
+  const formattedExpenses = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: transaction.currency
+  }).format(monthlyExpenses);
+
+  const formattedBalance = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: transaction.currency
+  }).format(currentBalance);
+
+  const formattedRemainingBalance = new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: transaction.currency
+  }).format(remainingBalance);
+
+  // Format date and time
+  const txDate = new Date();  // Use current time for recurring transactions
+  const hours = txDate.getHours();
+  const minutes = txDate.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const formattedHours = hours % 12 || 12; // Convert 24h to 12h format
+  const formattedMinutes = minutes.toString().padStart(2, '0');
+  
+  const formattedDate = txDate.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+
+  const formattedTime = `${formattedHours}:${formattedMinutes} ${ampm}`;
+
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #1A202C; color: #FFFFFF; border-radius: 10px;">
+      <div style="text-align: center; margin-bottom: 30px; background: #2D3748; padding: 20px; border-radius: 8px;">
+        <h1 style="color: #FFFFFF; margin-bottom: 10px; font-size: 24px;">
+          ${isUpcoming ? '🔔 Upcoming Transaction Alert' : '✅ Transaction Processed'}
+        </h1>
+        <p style="color: #A0AEC0; font-size: 1.1em; margin: 0;">
+          ${transaction.title}
+        </p>
+        <p style="color: #718096; font-size: 0.9em; margin-top: 5px;">
+          ${formattedDate} at ${formattedTime}
         </p>
       </div>
 
-      <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; color: #666; font-size: 12px;">
-        <p>This is an automated message from your Expense Tracker.</p>
+      <div style="background: #2D3748; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <div style="display: inline-block; padding: 15px 30px; background: ${transaction.type === 'expense' ? '#FC8181' : '#68D391'}; border-radius: 8px;">
+            <p style="font-size: 1.5em; margin: 0; color: #FFFFFF; font-weight: bold;">
+              ${formattedAmount}
+            </p>
+            <p style="margin: 5px 0 0; color: #FFFFFF; font-size: 0.9em;">
+              ${transaction.type.charAt(0).toUpperCase() + transaction.type.slice(1)}
+            </p>
+          </div>
+        </div>
+
+        <div style="border-top: 2px solid #4A5568; padding-top: 20px;">
+          <h3 style="color: #FFFFFF; margin-bottom: 15px; text-align: center;">Monthly Overview</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <div style="text-align: center; padding: 15px; background: #2C5282; border-radius: 8px;">
+              <p style="margin: 0; color: #90CDF4; font-weight: bold;">Income</p>
+              <p style="margin: 5px 0; font-size: 1.1em; color: #FFFFFF;">${formattedIncome}</p>
+            </div>
+            <div style="text-align: center; padding: 15px; background: #C53030; border-radius: 8px;">
+              <p style="margin: 0; color: #FED7D7; font-weight: bold;">Expenses</p>
+              <p style="margin: 5px 0; font-size: 1.1em; color: #FFFFFF;">${formattedExpenses}</p>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 20px; text-align: center; padding: 20px; background: #234E52; border-radius: 8px;">
+          <p style="margin: 0; color: #81E6D9; font-weight: bold;">Current Balance</p>
+          <p style="margin: 5px 0; font-size: 1.5em; color: #FFFFFF;">${formattedBalance}</p>
+          <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #4A5568;">
+            <p style="margin: 0; color: #81E6D9; font-size: 0.9em;">After this transaction</p>
+            <p style="margin: 5px 0; font-size: 1.2em; color: ${remainingBalance >= 0 ? '#68D391' : '#FC8181'};">
+              ${formattedRemainingBalance}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align: center; padding: 15px; background: #2D3748; border-radius: 8px;">
+        <p style="color: #A0AEC0; margin: 0;">This is an automated message from your Expense Tracker</p>
+        <p style="color: #718096; font-size: 0.8em; margin-top: 5px;">
+          Transaction ID: ${transaction._id}
+        </p>
       </div>
     </div>
   `;
+}
 
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: user.email,
-    subject: `🔔 Loan Payment Reminder: ${loan.title}`,
-    html
-  };
+// Email service functions
+export async function sendRecurringTransactionWarning(user, upcomingTransactions) {
+  try {
+    console.log('Sending warning for upcoming transactions:', upcomingTransactions);
+    const transactionsArray = Array.isArray(upcomingTransactions) ? upcomingTransactions : [upcomingTransactions];
+    
+    // Get user with populated categories if not already populated
+    const populatedUser = user.categories ? user : await User.findById(user._id).populate('categories');
+    if (!populatedUser) throw new Error('User not found');
 
-  return sendEmailWithRetryHelper(mailOptions);
+    // Send email for each transaction
+    for (const transaction of transactionsArray) {
+      const template = await generateTransactionEmailTemplate(
+        populatedUser,
+        transaction,
+        true // isUpcoming
+      );
+
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: populatedUser.email,
+        subject: `🔔 Upcoming Transaction: ${transaction.title}`,
+        html: template
+      };
+
+      console.log('Queueing warning email for:', transaction.title);
+      await queueEmail(mailOptions);
+    }
+  } catch (error) {
+    console.error('Error sending transaction warning:', error);
+    throw error;
+  }
+}
+
+export async function sendRecurringTransactionConfirmation(user, processedTransactions) {
+  try {
+    console.log('Sending confirmation for recurring transactions:', processedTransactions);
+    const transactionsArray = Array.isArray(processedTransactions) ? processedTransactions : [processedTransactions];
+    
+    // Get user with populated categories if not already populated
+    const populatedUser = user.categories ? user : await User.findById(user._id).populate('categories');
+    if (!populatedUser) throw new Error('User not found');
+
+    // Send email for each transaction
+    for (const transaction of transactionsArray) {
+      const template = await generateTransactionEmailTemplate(
+        populatedUser,
+        transaction,
+        false // not upcoming
+      );
+
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: populatedUser.email,
+        subject: `✅ Transaction Processed: ${transaction.title}`,
+        html: template
+      };
+
+      console.log('Queueing confirmation email for:', transaction.title);
+      await queueEmail(mailOptions);
+    }
+  } catch (error) {
+    console.error('Error sending transaction confirmation:', error);
+    throw error;
+  }
 }

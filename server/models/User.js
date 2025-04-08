@@ -8,7 +8,8 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   defaultCurrency: { type: String, default: 'USD' },
   theme: { type: String, default: 'light' },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  categories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }]  // Reference to user's categories
 });
 
 userSchema.pre('save', async function(next) {

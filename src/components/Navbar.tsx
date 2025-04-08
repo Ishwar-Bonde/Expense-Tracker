@@ -15,7 +15,8 @@ import {
   RefreshCw,
   AlertTriangle,
   TrendingUp,
-  ChevronDown
+  ChevronDown,
+  Users
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import Modal from './Modal';
@@ -29,10 +30,11 @@ const mainMenuItems = [
   { path: '/predictions', label: 'Predictions', icon: TrendingUp },
 ];
 
-const loanMenuItems = [
+const featureMenuItems = [
   { path: '/loans', label: 'My Loans', icon: DollarSign },
   { path: '/loans/calculator', label: 'Loan Calculator', icon: Tag },
   { path: '/loans/compare', label: 'Compare Loans', icon: AlertTriangle },
+  // { path: '/groups', label: 'Groups', icon: Users },
 ];
 
 function Navbar() {
@@ -40,7 +42,7 @@ function Navbar() {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
-  const [showLoanMenu, setShowLoanMenu] = useState(false);
+  const [showFeatureMenu, setShowFeatureMenu] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -49,7 +51,7 @@ function Navbar() {
     setShowLogoutDialog(false);
   };
 
-  const isLoanPath = location.pathname.startsWith('/loans');
+  const isFeaturePath = location.pathname.startsWith('/loans') || location.pathname.startsWith('/groups');
 
   return (
     <>
@@ -90,24 +92,24 @@ function Navbar() {
                 })}
               </div>
 
-              {/* Loans Dropdown */}
+              {/* Features Dropdown */}
               <div className="relative">
                 <button
-                  onClick={() => setShowLoanMenu(!showLoanMenu)}
+                  onClick={() => setShowFeatureMenu(!showFeatureMenu)}
                   className={`flex items-center px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                    isLoanPath
+                    isFeaturePath
                       ? 'bg-white dark:bg-gray-700 text-purple-600 dark:text-purple-400 shadow-sm'
                       : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-purple-600 dark:hover:text-purple-400'
                   }`}
                 >
-                  <DollarSign className={`w-4 h-4 mr-1.5 ${isLoanPath ? 'stroke-2' : 'stroke-1'}`} />
-                  Loans
-                  <ChevronDown className={`w-4 h-4 ml-1 transform transition-transform duration-200 ${showLoanMenu ? 'rotate-180' : ''}`} />
+                  <DollarSign className={`w-4 h-4 mr-1.5 ${isFeaturePath ? 'stroke-2' : 'stroke-1'}`} />
+                  Features
+                  <ChevronDown className={`w-4 h-4 ml-1 transform transition-transform duration-200 ${showFeatureMenu ? 'rotate-180' : ''}`} />
                 </button>
 
-                {/* Loans Dropdown Menu */}
+                {/* Features Dropdown Menu */}
                 <AnimatePresence>
-                  {showLoanMenu && (
+                  {showFeatureMenu && (
                     <motion.div
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -116,7 +118,7 @@ function Navbar() {
                       className="absolute right-0 mt-1 w-48 origin-top-right rounded-xl bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black/5 focus:outline-none"
                     >
                       <div className="p-1">
-                        {loanMenuItems.map((item) => {
+                        {featureMenuItems.map((item) => {
                           const Icon = item.icon;
                           const isActive = location.pathname === item.path;
                           return (
@@ -128,7 +130,7 @@ function Navbar() {
                                   ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'
                                   : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50'
                               }`}
-                              onClick={() => setShowLoanMenu(false)}
+                              onClick={() => setShowFeatureMenu(false)}
                             >
                               <Icon className={`w-4 h-4 mr-1.5 ${isActive ? 'stroke-2' : 'stroke-1'}`} />
                               {item.label}
@@ -208,9 +210,9 @@ function Navbar() {
                   );
                 })}
 
-                {/* Mobile Loans Menu */}
+                {/* Mobile Features Menu */}
                 <div className="space-y-1 pl-4 border-l-2 border-gray-100 dark:border-gray-800">
-                  {loanMenuItems.map((item) => {
+                  {featureMenuItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = location.pathname === item.path;
                     return (

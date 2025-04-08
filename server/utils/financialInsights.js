@@ -1,154 +1,135 @@
 import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
 
-export async function getFinancialInsights(userId, transactions, currency = 'INR') {
-  const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  
-  // Get monthly totals
-  const monthlyTransactions = await Transaction.aggregate([
-    {
-      $match: {
-        userId: new mongoose.Types.ObjectId(userId),
-        date: { $gte: startOfMonth, $lte: endOfMonth }
+export async function getFinancialInsights(userId, newTransactions = [], currency = 'INR') {
+  try {
+    console.log('=== Getting Financial Insights ===');
+    console.log('New Transactions:', JSON.stringify(newTransactions, null, 2));
+    
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    
+    const newTransaction = newTransactions[0] || { amount: 0, type: 'expense', _id: null };
+    console.log('Processing transaction:', JSON.stringify(newTransaction, null, 2));
+
+    // First get ALL transactions for this month to see what we have
+    const allMonthlyTransactions = await Transaction.find({
+      userId: userId,
+      date: { 
+        $gte: startOfMonth, 
+        $lte: endOfMonth 
       }
-    },
-    {
-      $group: {
-        _id: '$type',
-        total: { $sum: '$amount' }
+    }).select('amount type title date');
+
+    console.log('All Monthly Transactions:', JSON.stringify(allMonthlyTransactions.map(t => ({
+      id: t._id,
+      title: t.title,
+      type: t.type,
+      amount: t.amount,
+      date: t.date
+    })), null, 2));
+    
+    // Get monthly transactions
+    const monthlyTransactions = await Transaction.aggregate([
+      {
+        $match: {
+          userId: new mongoose.Types.ObjectId(userId),
+          date: { 
+            $gte: startOfMonth, 
+            $lte: endOfMonth 
+          }
+        }
+      },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$amount' },
+          transactions: { 
+            $push: { 
+              id: '$_id', 
+              title: '$title',
+              amount: '$amount', 
+              date: '$date',
+              isRecurring: '$isRecurring'
+            } 
+          }
+        }
       }
-    }
-  ]);
+    ]);
 
-  const monthlyExpenses = monthlyTransactions.find(t => t._id === 'expense')?.total || 0;
-  const monthlyIncome = monthlyTransactions.find(t => t._id === 'income')?.total || 0;
+    console.log('Monthly Aggregated Totals:', JSON.stringify(monthlyTransactions, null, 2));
 
-  // Get category spending for this month
-  const categorySpending = await Transaction.aggregate([
-    {
-      $match: {
-        userId: new mongoose.Types.ObjectId(userId),
-        type: 'expense',
-        date: { $gte: startOfMonth, $lte: endOfMonth }
-      }
-    },
-    {
-      $group: {
-        _id: '$categoryId',
-        total: { $sum: '$amount' }
-      }
-    },
-    {
-      $lookup: {
-        from: 'categories',
-        localField: '_id',
-        foreignField: '_id',
-        as: 'category'
-      }
-    },
-    {
-      $unwind: '$category'
-    },
-    {
-      $sort: { total: -1 }
-    },
-    {
-      $limit: 3
-    }
-  ]);
+    // Calculate monthly totals
+    let monthlyExpenses = monthlyTransactions.find(t => t._id === 'expense')?.total || 0;
+    let monthlyIncome = monthlyTransactions.find(t => t._id === 'income')?.total || 0;
 
-  // Get historical comparison (last 3 months)
-  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-  const historicalData = await Transaction.aggregate([
-    {
-      $match: {
-        userId: new mongoose.Types.ObjectId(userId),
-        date: { $gte: threeMonthsAgo }
-      }
-    },
-    {
-      $group: {
-        _id: {
-          month: { $month: '$date' },
-          year: { $year: '$date' },
-          type: '$type'
-        },
-        total: { $sum: '$amount' }
-      }
-    },
-    {
-      $sort: { '_id.year': 1, '_id.month': 1 }
-    }
-  ]);
-
-  // Calculate month-over-month changes
-  const currentMonthExpenses = monthlyExpenses;
-  const lastMonthExpenses = historicalData
-    .filter(d => d._id.month === (now.getMonth() === 0 ? 12 : now.getMonth()) && 
-                 d._id.year === (now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()) &&
-                 d._id.type === 'expense')
-    [0]?.total || 0;
-
-  const expenseChange = ((currentMonthExpenses - lastMonthExpenses) / lastMonthExpenses) * 100;
-
-  // Calculate budget impact
-  const budgetImpact = {
-    totalBudgeted: 0,
-    totalSpent: monthlyExpenses,
-    remaining: 0,
-    categories: []
-  };
-
-  // Get budget information for categories
-  const budgets = await mongoose.model('Budget').find({
-    userId: userId,
-    month: now.getMonth() + 1,
-    year: now.getFullYear()
-  }).populate('categoryId');
-
-  if (budgets.length > 0) {
-    budgetImpact.totalBudgeted = budgets.reduce((sum, budget) => sum + budget.amount, 0);
-    budgetImpact.remaining = budgetImpact.totalBudgeted - budgetImpact.totalSpent;
-
-    budgetImpact.categories = budgets.map(budget => {
-      const spent = categorySpending.find(cs => cs._id.equals(budget.categoryId._id))?.total || 0;
-      return {
-        name: budget.categoryId.name,
-        budgeted: budget.amount,
-        spent: spent,
-        remaining: budget.amount - spent,
-        percentage: (spent / budget.amount) * 100
-      };
-    });
-  }
-
-  // Calculate recurring transaction impact
-  const recurringTotal = transactions.reduce((sum, tx) => sum + tx.amount, 0);
-  const recurringImpact = (recurringTotal / monthlyExpenses) * 100;
-
-  return {
-    monthlyOverview: {
+    console.log('Initial Monthly Totals:', {
       income: monthlyIncome,
-      expenses: monthlyExpenses,
-      balance: monthlyIncome - monthlyExpenses,
-      currency
-    },
-    topCategories: categorySpending.map(cat => ({
-      name: cat.category.name,
-      amount: cat.total,
-      percentage: (cat.total / monthlyExpenses) * 100
-    })),
-    monthOverMonth: {
-      expenseChange,
-      trend: expenseChange > 0 ? 'increase' : 'decrease'
-    },
-    budgetImpact,
-    recurringImpact: {
-      amount: recurringTotal,
-      percentage: recurringImpact,
-      currency
+      expenses: monthlyExpenses
+    });
+
+    // Only add new transaction if it's not recurring (recurring ones are already in DB)
+    if (newTransaction._id && !newTransaction.isRecurring) {
+      console.log('Adding non-recurring transaction to totals:', newTransaction);
+      if (newTransaction.type === 'income') {
+        monthlyIncome += newTransaction.amount || 0;
+      } else {
+        monthlyExpenses += newTransaction.amount || 0;
+      }
     }
-  };
+
+    console.log('Final Monthly Totals:', {
+      income: monthlyIncome,
+      expenses: monthlyExpenses
+    });
+
+    // Get all transactions for total balance
+    const allTransactions = await Transaction.aggregate([
+      {
+        $match: {
+          userId: new mongoose.Types.ObjectId(userId)
+        }
+      },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    // Calculate total balance
+    const totalIncome = allTransactions.find(t => t._id === 'income')?.total || 0;
+    const totalExpenses = allTransactions.find(t => t._id === 'expense')?.total || 0;
+    const currentBalance = totalIncome - totalExpenses;
+
+    // Calculate remaining balance
+    const remainingBalance = newTransaction.type === 'expense' 
+      ? currentBalance - (newTransaction.isRecurring ? 0 : (newTransaction.amount || 0))
+      : currentBalance + (newTransaction.isRecurring ? 0 : (newTransaction.amount || 0));
+
+    const result = {
+      monthlyOverview: {
+        income: monthlyIncome,
+        expenses: monthlyExpenses,
+        balance: currentBalance,
+        currency
+      },
+      recurringImpact: {
+        amount: newTransaction.amount || 0,
+        remainingBalance,
+        currency
+      }
+    };
+
+    console.log('Final result:', result);
+    return result;
+  } catch (error) {
+    console.error('Error getting financial insights:', error);
+    return {
+      monthlyOverview: { income: 0, expenses: 0, balance: 0, currency },
+      recurringImpact: { amount: 0, remainingBalance: 0, currency }
+    };
+  }
 }

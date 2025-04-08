@@ -1,20 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { PlusCircle, DollarSign, Calendar, FileText, Tag } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { toast } from 'react-hot-toast';
+import { PlusCircle, DollarSign, Calendar, FileText, Tag } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Loading from '../components/Loading';
 import { fadeIn, formItemAnimation, buttonAnimation } from '../utils/animations';
-import { formatCurrency, CurrencyCode, CURRENCIES } from '../utils/currency';
+import { formatCurrency, CurrencyCode, CURRENCIES, convertCurrencyWithRates, getExchangeRates } from '../utils/currency';
 import { API_BASE_URL } from '../config';
+import toast from 'react-hot-toast';
 import CategorySelect from '../components/CategorySelect';
 import { getDefaultCategoryForType } from '../utils/categories';
 
 interface FormData {
   title: string;
   description: string;
-  amount: string;
+  amount: number;
   date: string;
   categoryId: string;
 }
@@ -28,14 +27,14 @@ interface Transaction {
   type: 'income' | 'expense';
   categoryId: string;
   createdAt: string;
+  currency: string;
 }
 
 const AddIncome: React.FC = () => {
-  const navigate = useNavigate();
   const [formData, setFormData] = useState<FormData>({
     title: '',
     description: '',
-    amount: '0.00',
+    amount: 0,
     date: new Date().toISOString().split('T')[0],
     categoryId: getDefaultCategoryForType('income').id
   });
@@ -44,6 +43,7 @@ const AddIncome: React.FC = () => {
   const [success, setSuccess] = useState(false);
   const [userCurrency, setUserCurrency] = useState<CurrencyCode>('USD');
   const [recentIncomes, setRecentIncomes] = useState<Transaction[]>([]);
+  const [convertedAmounts, setConvertedAmounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -68,6 +68,26 @@ const AddIncome: React.FC = () => {
     setRecentIncomes(recentIncomes);
   }, [recentIncomes]);
 
+  useEffect(() => {
+    const updateAmounts = async () => {
+      if (recentIncomes.length > 0) {
+        const rates = await getExchangeRates(userCurrency);
+        if (!rates) return;
+
+        const converted: Record<string, number> = {};
+        for (const income of recentIncomes) {
+          const sourceCurrency = (income.currency || 'USD') as CurrencyCode;
+          const targetCurrency = userCurrency as CurrencyCode;
+          const convertedAmount = await convertCurrencyWithRates(income.amount, sourceCurrency, targetCurrency, rates);
+          converted[income._id] = convertedAmount;
+        }
+        setConvertedAmounts(converted);
+      }
+    };
+
+    updateAmounts();
+  }, [recentIncomes, userCurrency]);
+
   const fetchRecentIncomes = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/transactions?type=income&limit=5`, {
@@ -89,51 +109,42 @@ const AddIncome: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     setIsLoading(true);
-    setSuccess(false);
 
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      const currency = user.defaultCurrency || 'USD';
-
-      // Validate category
-      if (!formData.categoryId) {
-        throw new Error('Please select a category');
-      }
-
       const response = await fetch(`${API_BASE_URL}/api/transactions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          Authorization: `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
-          title: formData.title,
-          description: formData.description,
-          amount: parseFloat(formData.amount),
-          date: formData.date,
+          ...formData,
           type: 'income',
-          currency: currency,
-          categoryId: formData.categoryId // Ensure categoryId is included
+          currency: userCurrency
         })
       });
 
       const data = await response.json();
-      console.log('Response from server:', data); // Debug log
 
       if (response.ok) {
         setSuccess(true);
         toast.success('Income added successfully!');
-        navigate('/dashboard');
+        fetchRecentIncomes();
+        setFormData({
+          title: '',
+          description: '',
+          amount: 0,
+          date: new Date().toISOString().split('T')[0],
+          categoryId: getDefaultCategoryForType('income').id
+        });
       } else {
         setError(data.message || 'Failed to add income');
         toast.error(data.message || 'Failed to add income');
       }
     } catch (err) {
-      const error = err as Error;
-      setError(error.message || 'An error occurred while adding income');
-      toast.error(error.message || 'An error occurred while adding income');
+      setError('An error occurred while adding the income');
+      toast.error('An error occurred while adding the income');
     } finally {
       setIsLoading(false);
     }
@@ -141,10 +152,17 @@ const AddIncome: React.FC = () => {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    if (name === 'amount') {
+      setFormData(prev => ({
+        ...prev,
+        [name]: parseFloat(value)
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
   };
 
   const handleCategoryChange = (categoryId: string) => {
@@ -345,12 +363,11 @@ const AddIncome: React.FC = () => {
                   <p className="text-sm text-gray-500 dark:text-gray-500">Your recent incomes will appear here</p>
                 </div>
               ) : (
-                recentIncomes.map((income, index) => (
+                recentIncomes.map((income) => (
                   <motion.div
                     key={income._id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
                     className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 hover:shadow-md transition-shadow duration-200"
                   >
                     <div className="flex justify-between items-start">
@@ -371,7 +388,7 @@ const AddIncome: React.FC = () => {
                         </div>
                       </div>
                       <span className="text-lg font-semibold text-green-600 dark:text-green-400">
-                        +{formatCurrency(income.amount, userCurrency)}
+                        +{formatCurrency(convertedAmounts[income._id] || income.amount, userCurrency)}
                       </span>
                     </div>
                   </motion.div>

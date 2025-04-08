@@ -1,7 +1,7 @@
 import express from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import Loan from '../models/Loan.js';
-import { sendLoanPaymentReminder } from '../utils/emailService.js';
+import { sendLoanPaymentReminder } from '../services/loanService.js';
 
 const router = express.Router();
 
@@ -46,7 +46,8 @@ router.post('/', authenticateToken, async (req, res) => {
       documents,
       collateral,
       guarantor,
-      penalties
+      penalties,
+      installmentAmount
     } = req.body;
 
     // Create a new loan instance
@@ -67,7 +68,9 @@ router.post('/', authenticateToken, async (req, res) => {
       collateral,
       guarantor,
       penalties,
-      status: 'active'
+      status: 'active',
+      remainingAmount: parseFloat(amount), // Set initial remaining amount to full amount
+      installmentAmount: parseFloat(installmentAmount) // Get from request body
     });
 
     // The pre-save hook will handle nextPaymentDate calculation
@@ -105,34 +108,82 @@ router.patch('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Add a payment
-router.post('/:id/payments', authenticateToken, async (req, res) => {
+// Update loan status
+router.patch('/:id/status', authenticateToken, async (req, res) => {
   try {
+    const { status } = req.body;
+    
+    // Validate status
+    if (!['active', 'completed'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status value' });
+    }
+
     const loan = await Loan.findOne({ _id: req.params.id, userId: req.user.id });
+    
     if (!loan) {
       return res.status(404).json({ message: 'Loan not found' });
     }
 
-    const { amount, date, type, notes } = req.body;
+    loan.status = status;
+    await loan.save();
+
+    res.json({ message: 'Loan status updated successfully', loan });
+  } catch (error) {
+    console.error('Error updating loan status:', error);
+    res.status(500).json({ message: 'Error updating loan status' });
+  }
+});
+
+// Record a loan payment
+router.post('/:id/payments', authenticateToken, async (req, res) => {
+  try {
+    const { amount, method, notes, date } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'Invalid payment amount' });
+    }
+
+    const loan = await Loan.findOne({ _id: req.params.id, userId: req.user.id });
     
+    if (!loan) {
+      return res.status(404).json({ message: 'Loan not found' });
+    }
+
+    if (amount > loan.remainingAmount) {
+      return res.status(400).json({ message: 'Payment amount exceeds remaining loan amount' });
+    }
+
+    // Initialize payments array if it doesn't exist
+    if (!Array.isArray(loan.payments)) {
+      loan.payments = [];
+    }
+
+    // Add the payment
     loan.payments.push({
-      amount,
-      date,
-      type,
-      notes,
+      amount: Number(amount),
+      method: method || 'cash',
+      date: new Date(date || Date.now()),
+      notes: notes || '',
       status: 'completed'
     });
 
-    // Update loan status and remaining amount
-    await loan.updateStatus();
-    
-    // Calculate next payment date
-    loan.nextPaymentDate = loan.calculateNextPaymentDate();
-    
+    // Update remaining amount
+    loan.remainingAmount = Math.max(0, loan.remainingAmount - Number(amount));
+
+    // Update loan status if fully paid
+    if (loan.remainingAmount === 0) {
+      loan.status = 'completed';
+    }
+
     await loan.save();
-    res.status(201).json(loan);
+
+    res.json({ 
+      message: 'Payment recorded successfully',
+      loan: loan
+    });
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    console.error('Error recording payment:', error);
+    res.status(500).json({ message: 'Error recording payment' });
   }
 });
 

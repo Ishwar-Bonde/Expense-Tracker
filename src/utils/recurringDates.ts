@@ -1,4 +1,4 @@
-import { addDays, addWeeks, addMonths, addYears, isBefore, startOfDay } from 'date-fns';
+import { addDays, addWeeks, addMonths, addYears, isBefore, startOfDay, endOfDay, isValid } from 'date-fns';
 
 export type RecurringFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -15,48 +15,71 @@ interface RecurringDateOptions {
  */
 export function calculateNextOccurrence(options: RecurringDateOptions): Date {
   const { startDate, frequency, endDate } = options;
+
+  // Validate inputs
+  if (!isValid(startDate)) {
+    throw new Error('Invalid start date');
+  }
+  if (endDate && !isValid(endDate)) {
+    throw new Error('Invalid end date');
+  }
+  if (endDate && isBefore(endDate, startDate)) {
+    throw new Error('End date must be after start date');
+  }
+
   const today = startOfDay(new Date());
-  let nextDate: Date;
+  let nextDate = startOfDay(startDate);
 
   // Helper function to get next date based on frequency
   const getNextDate = (date: Date): Date => {
+    const originalDay = date.getDate();
+    let nextDate: Date;
+
     switch (frequency) {
       case 'daily':
-        return addDays(date, 1);
+        nextDate = addDays(date, 1);
+        break;
       case 'weekly':
-        return addWeeks(date, 1);
+        nextDate = addWeeks(date, 1);
+        break;
       case 'monthly':
         // For monthly, we try to maintain the same day of month
-        const nextMonth = addMonths(date, 1);
+        nextDate = addMonths(date, 1);
         // Check if we've moved to a different day of month (e.g., 31st -> 1st)
-        if (nextMonth.getDate() !== date.getDate()) {
+        if (nextDate.getDate() !== originalDay) {
           // If so, move back to the last day of the intended month
-          nextMonth.setDate(0);
+          nextDate = endOfDay(addMonths(date, 1));
+          nextDate.setDate(0); // Move to last day of previous month
         }
-        return nextMonth;
+        break;
       case 'yearly':
-        return addYears(date, 1);
+        nextDate = addYears(date, 1);
+        // Handle February 29 in leap years
+        if (nextDate.getDate() !== originalDay) {
+          nextDate = endOfDay(addYears(date, 1));
+          nextDate.setDate(0);
+        }
+        break;
       default:
         throw new Error(`Invalid frequency: ${frequency}`);
     }
-  };
 
-  // Start with the initial date
-  nextDate = startOfDay(startDate);
+    return startOfDay(nextDate);
+  };
 
   // If the start date is in the future, use it as the next occurrence
   if (isBefore(today, nextDate)) {
     return nextDate;
   }
 
-  // Keep advancing the date until we find the next occurrence
+  // Find the next occurrence after today
   while (isBefore(nextDate, today) || nextDate.getTime() === today.getTime()) {
     nextDate = getNextDate(nextDate);
-  }
-
-  // If there's an end date and we've passed it, return null
-  if (endDate && isBefore(endDate, nextDate)) {
-    return endDate;
+    
+    // Check if we've passed the end date
+    if (endDate && isBefore(endDate, nextDate)) {
+      return endDate;
+    }
   }
 
   return nextDate;
@@ -68,13 +91,21 @@ export function calculateNextOccurrence(options: RecurringDateOptions): Date {
 export function getOccurrencesBetweenDates(
   options: RecurringDateOptions & { endDate: Date }
 ): Date[] {
-  const { startDate, endDate } = options;
+  const { startDate, frequency, endDate } = options;
   const occurrences: Date[] = [];
   let currentDate = startOfDay(startDate);
 
+  // Validate inputs
+  if (!isValid(startDate) || !isValid(endDate)) {
+    throw new Error('Invalid date input');
+  }
+  if (isBefore(endDate, startDate)) {
+    throw new Error('End date must be after start date');
+  }
+
   while (isBefore(currentDate, endDate) || currentDate.getTime() === endDate.getTime()) {
     occurrences.push(currentDate);
-    currentDate = calculateNextOccurrence({ ...options, startDate: currentDate });
+    currentDate = calculateNextOccurrence({ startDate: currentDate, frequency, endDate });
     
     // Safety check to prevent infinite loops
     if (occurrences.length > 1000) {
@@ -90,74 +121,63 @@ export function getOccurrencesBetweenDates(
  * Validates if a given date is a valid occurrence for a recurring transaction
  */
 export function isValidOccurrence(date: Date, options: RecurringDateOptions): boolean {
-  const occurrenceDate = calculateNextOccurrence({
-    ...options,
-    startDate: date
-  });
-  return occurrenceDate.getTime() === startOfDay(date).getTime();
-}
-
-// Process recurring transactions and update their next due dates
-export async function processRecurringTransactions(transaction: any, API_BASE_URL: string) {
   try {
-    const today = new Date();
-    const nextDueDate = new Date(transaction.nextDueDate);
-    
-    // If the next due date has passed
-    if (nextDueDate <= today) {
-      // Create the actual transaction
-      const transactionPayload = {
-        title: transaction.title,
-        description: transaction.description,
-        amount: transaction.amount,
-        type: transaction.type,
-        categoryId: transaction.categoryId,
-        currency: transaction.currency,
-        date: nextDueDate.toISOString(),
-        icon: transaction.icon
-      };
+    const { startDate, frequency, endDate } = options;
+    const normalizedDate = startOfDay(date);
+    const normalizedStart = startOfDay(startDate);
 
-      // Create the transaction
-      const token = localStorage.getItem('token');
-      await fetch(`${API_BASE_URL}/api/transactions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(transactionPayload)
-      });
-
-      // Calculate the next occurrence
-      const newNextDueDate = calculateNextOccurrence({
-        startDate: nextDueDate,
-        frequency: transaction.frequency,
-        endDate: transaction.endDate ? new Date(transaction.endDate) : undefined
-      });
-
-      // Update the recurring transaction with the new next due date
-      await fetch(`${API_BASE_URL}/api/recurring-transactions/${transaction._id}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          lastProcessedDate: nextDueDate.toISOString(),
-          nextDueDate: newNextDueDate.toISOString()
-        })
-      });
-
-      return {
-        success: true,
-        newNextDueDate: newNextDueDate.toISOString()
-      };
+    // Check basic validity
+    if (!isValid(date) || !isValid(startDate)) {
+      return false;
     }
 
-    return {
-      success: false,
-      message: 'Next due date has not arrived yet'
-    };
+    // Check if date is before start date
+    if (isBefore(normalizedDate, normalizedStart)) {
+      return false;
+    }
+
+    // Check if date is after end date
+    if (endDate && isBefore(endDate, normalizedDate)) {
+      return false;
+    }
+
+    // Get all occurrences up to this date
+    const occurrences = getOccurrencesBetweenDates({
+      startDate,
+      frequency,
+      endDate: date
+    });
+
+    // Check if this date matches any occurrence
+    return occurrences.some(
+      occurrence => occurrence.getTime() === normalizedDate.getTime()
+    );
+  } catch (error) {
+    console.error('Error in isValidOccurrence:', error);
+    return false;
+  }
+}
+
+/**
+ * Process recurring transactions and update their next due dates
+ */
+export async function processRecurringTransactions(transaction: any, API_BASE_URL: string) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/recurring-transactions/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      },
+      body: JSON.stringify({ transactionId: transaction._id })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to process recurring transaction');
+    }
+
+    return await response.json();
   } catch (error) {
     console.error('Error processing recurring transaction:', error);
     throw error;

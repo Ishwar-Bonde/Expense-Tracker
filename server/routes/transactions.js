@@ -14,7 +14,15 @@ router.use(authenticateToken);
 router.get('/', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || undefined;
-    const transactions = await Transaction.find({ userId: req.user.id })
+    const type = req.query.type; // Get the type from query params
+    
+    // Build query object
+    const query = { userId: req.user.id };
+    if (type) {
+      query.type = type; // Add type filter if provided
+    }
+    
+    const transactions = await Transaction.find(query)
       .sort({ date: -1 })
       .limit(limit);
     res.json(transactions);
@@ -31,7 +39,7 @@ router.post('/', async (req, res) => {
     const userCurrency = user.defaultCurrency || 'USD';
 
     // Validate required fields
-    if (!req.body.title || !req.body.amount || !req.body.type || !req.body.categoryId) {
+    if (!req.body.title || !req.body.amount || !req.body.type) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
@@ -39,16 +47,14 @@ router.post('/', async (req, res) => {
     const transaction = new Transaction({
       ...req.body,
       userId: req.user.id,
-      currency: userCurrency,
+      currency: req.body.currency || userCurrency, // Use provided currency or user's default
       date: req.body.date || new Date()
     });
 
     await transaction.save();
     
-    // Populate the category before sending response
-    await transaction.populate('categoryId');
-    
-    console.log('Created transaction:', transaction); // Debug log
+    // Debug log
+    console.log('Created transaction:', transaction);
     res.status(201).json(transaction);
   } catch (error) {
     console.error('Error creating transaction:', error);

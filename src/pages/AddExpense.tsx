@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { MinusCircle, DollarSign, Calendar, FileText, Tag } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Loading from '../components/Loading';
 import { fadeIn, formItemAnimation, buttonAnimation } from '../utils/animations';
-import { formatCurrency, CurrencyCode, CURRENCIES } from '../utils/currency';
+import { formatCurrency, CurrencyCode, CURRENCIES, convertCurrencyWithRates, getExchangeRates } from '../utils/currency';
 import { API_BASE_URL } from '../config';
 import toast from 'react-hot-toast';
 import CategorySelect from '../components/CategorySelect';
@@ -14,7 +13,7 @@ import { getDefaultCategoryForType } from '../utils/categories';
 interface FormData {
   title: string;
   description: string;
-  amount: string;
+  amount: number;
   date: string;
   categoryId: string;
 }
@@ -27,14 +26,14 @@ interface Transaction {
   date: string;
   type: 'income' | 'expense';
   createdAt: string;
+  currency: string;
 }
 
 function AddExpense() {
-  const navigate = useNavigate();
   const [formData, setFormData] = useState<FormData>({
     title: '',
     description: '',
-    amount: '0.00',
+    amount: 0,
     date: new Date().toISOString().split('T')[0],
     categoryId: getDefaultCategoryForType('expense').id
   });
@@ -43,6 +42,7 @@ function AddExpense() {
   const [success, setSuccess] = useState(false);
   const [userCurrency, setUserCurrency] = useState<CurrencyCode>('USD');
   const [recentExpenses, setRecentExpenses] = useState<Transaction[]>([]);
+  const [convertedAmounts, setConvertedAmounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -64,8 +64,24 @@ function AddExpense() {
   }, []);
 
   useEffect(() => {
-    fetchRecentExpenses();
-  }, []);
+    const updateAmounts = async () => {
+      if (recentExpenses.length > 0) {
+        const rates = await getExchangeRates(userCurrency);
+        if (!rates) return;
+
+        const converted: Record<string, number> = {};
+        for (const expense of recentExpenses) {
+          const sourceCurrency = (expense.currency || 'USD') as CurrencyCode;
+          const targetCurrency = userCurrency as CurrencyCode;
+          const convertedAmount = await convertCurrencyWithRates(expense.amount, sourceCurrency, targetCurrency, rates);
+          converted[expense._id] = convertedAmount;
+        }
+        setConvertedAmounts(converted);
+      }
+    };
+
+    updateAmounts();
+  }, [recentExpenses, userCurrency]);
 
   const fetchRecentExpenses = async () => {
     try {
@@ -88,51 +104,42 @@ function AddExpense() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     setIsLoading(true);
-    setSuccess(false);
 
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      const currency = user.defaultCurrency || 'USD';
-
-      // Validate category
-      if (!formData.categoryId) {
-        throw new Error('Please select a category');
-      }
-
       const response = await fetch(`${API_BASE_URL}/api/transactions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          Authorization: `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify({
-          title: formData.title,
-          description: formData.description,
-          amount: parseFloat(formData.amount),
-          date: formData.date,
+          ...formData,
           type: 'expense',
-          currency: currency,
-          categoryId: formData.categoryId // Ensure categoryId is included
+          currency: userCurrency
         })
       });
 
       const data = await response.json();
-      console.log('Response from server:', data); // Debug log
 
       if (response.ok) {
         setSuccess(true);
         toast.success('Expense added successfully!');
-        navigate('/dashboard');
+        fetchRecentExpenses();
+        setFormData({
+          title: '',
+          description: '',
+          amount: 0,
+          date: new Date().toISOString().split('T')[0],
+          categoryId: getDefaultCategoryForType('expense').id
+        });
       } else {
         setError(data.message || 'Failed to add expense');
         toast.error(data.message || 'Failed to add expense');
       }
     } catch (err) {
-      const error = err as Error;
-      setError(error.message || 'An error occurred while adding expense');
-      toast.error(error.message || 'An error occurred while adding expense');
+      setError('An error occurred while adding the expense');
+      toast.error('An error occurred while adding the expense');
     } finally {
       setIsLoading(false);
     }
@@ -148,10 +155,17 @@ function AddExpense() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    if (name === 'amount') {
+      setFormData(prev => ({
+        ...prev,
+        [name]: parseFloat(value)
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
   };
 
   return (
@@ -333,12 +347,11 @@ function AddExpense() {
                   <p className="text-sm text-gray-500 dark:text-gray-500">Your recent expenses will appear here</p>
                 </div>
               ) : (
-                recentExpenses.map((expense, index) => (
+                recentExpenses.map((expense) => (
                   <motion.div
                     key={expense._id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
                     className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 hover:shadow-md transition-shadow duration-200"
                   >
                     <div className="flex justify-between items-start">
@@ -359,7 +372,7 @@ function AddExpense() {
                         </div>
                       </div>
                       <span className="text-lg font-semibold text-red-600 dark:text-red-400">
-                        -{formatCurrency(expense.amount, userCurrency)}
+                        -{formatCurrency(convertedAmounts[expense._id] || expense.amount, userCurrency)}
                       </span>
                     </div>
                   </motion.div>

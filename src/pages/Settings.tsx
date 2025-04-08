@@ -22,7 +22,9 @@ import {
   X,
   ArrowUpCircle,
   ArrowDownCircle,
-  Folder
+  Folder,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Loading from '../components/Loading';
@@ -64,6 +66,8 @@ const Settings = () => {
   const [success, setSuccess] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [profile, setProfile] = useState({
     firstName: '',
     lastName: '',
@@ -729,33 +733,64 @@ const Settings = () => {
                 <div className="p-2 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
                   <Key className="w-6 h-6 text-purple-500 dark:text-purple-400" />
                 </div>
-                <h2 className="text-xl font-semibold text-gray-800 dark:text-white">Security Settings</h2>
+                <h2 className="text-xl font-semibold text-gray-800 dark:text-white">Change Password</h2>
               </div>
+
               <form onSubmit={handleChangePassword} className="space-y-5">
                 <motion.div variants={formItemAnimation} className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     Current Password
                   </label>
-                  <input
-                    type="password"
-                    required
-                    value={password.currentPassword}
-                    onChange={(e) => setPassword({ ...password, currentPassword: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 dark:bg-gray-700/50 dark:text-white transition-colors duration-200"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showCurrentPassword ? "text" : "password"}
+                      required
+                      value={password.currentPassword}
+                      onChange={(e) => setPassword({ ...password, currentPassword: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-purple-500 dark:bg-gray-700/50 dark:text-white transition-colors duration-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none transition-colors"
+                      style={{ transform: 'translateY(-50%)' }}
+                    >
+                      {showCurrentPassword ? (
+                        <EyeOff className="w-5 h-5" />
+                      ) : (
+                        <Eye className="w-5 h-5" />
+                      )}
+                    </button>
+                  </div>
                 </motion.div>
+
                 <motion.div variants={formItemAnimation} className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                     New Password
                   </label>
-                  <input
-                    type="password"
-                    required
-                    value={password.newPassword}
-                    onChange={(e) => setPassword({ ...password, newPassword: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 dark:bg-gray-700/50 dark:text-white transition-colors duration-200"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      required
+                      value={password.newPassword}
+                      onChange={(e) => setPassword({ ...password, newPassword: e.target.value })}
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-purple-500 dark:bg-gray-700/50 dark:text-white transition-colors duration-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none transition-colors"
+                      style={{ transform: 'translateY(-50%)' }}
+                    >
+                      {showNewPassword ? (
+                        <EyeOff className="w-5 h-5" />
+                      ) : (
+                        <Eye className="w-5 h-5" />
+                      )}
+                    </button>
+                  </div>
                 </motion.div>
+
                 <motion.button
                   variants={buttonAnimation}
                   type="submit"

@@ -1,12 +1,16 @@
 import dotenv from 'dotenv';
-// Load environment variables first
-dotenv.config();
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load environment variables from the root directory
+dotenv.config({ path: join(__dirname, '..', '.env') });
 
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 import nodeCron from 'node-cron';
 import { processRecurringTransactions, getUpcomingRecurringTransactions, getProcessedRecurringTransactions, scheduleNextTransactionCheck } from './utils/recurringTransactions.js';
 import { sendRecurringTransactionWarning, sendRecurringTransactionConfirmation } from './utils/emailService.js';
@@ -18,15 +22,25 @@ import loansRoutes from './routes/loans.js';
 import documentsRoutes from './routes/documents.js';
 import Transaction from './models/Transaction.js';
 import { API_URL_FRONTEND } from './config.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import chatbotRoutes from './routes/chatbot.js';
+import authRoutes from './routes/auth.js';
+import transactionRoutes from './routes/transactions.js';
+import settingsRoutes from './routes/settings.js';
+import themeRoutes from './routes/theme.js';
+import categoriesRoutes from './routes/categories.js';
+import recurringTransactionsRoutes from './routes/recurringTransactions.js';
+import recurringCategoriesRoutes from './routes/recurringCategories.js';
+import predictionsRoutes from './routes/predictions.js';
+import testRoutes from './routes/test.js';
+import groupsRouter from './routes/groups.js';
+import groupTransactionsRouter from './routes/groupTransactions.js';
+import groupCategoriesRouter from './routes/groupCategories.js';
 
 const app = express();
 
 // Configure CORS with specific options
 app.use(cors({
-  origin: [API_URL_FRONTEND],
+  origin: ['http://localhost:5173', 'http://localhost:5000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -51,16 +65,6 @@ app.use((req, res, next) => {
   next();
 });
 
-import authRoutes from './routes/auth.js';
-import transactionRoutes from './routes/transactions.js';
-import settingsRoutes from './routes/settings.js';
-import themeRoutes from './routes/theme.js';
-import categoriesRoutes from './routes/categories.js';
-import recurringTransactionsRoutes from './routes/recurringTransactions.js';
-import recurringCategoriesRoutes from './routes/recurringCategories.js';
-import predictionsRoutes from './routes/predictions.js';
-import testRoutes from './routes/test.js';
-
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/transactions', transactionRoutes);
@@ -74,9 +78,61 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/loans', loansRoutes);
 app.use('/api/documents', documentsRoutes);
 app.use('/api/test', testRoutes);
+app.use('/api/chatbot', chatbotRoutes);
+app.use('/api/groups', groupsRouter);
+app.use('/api/group-transactions', groupTransactionsRouter);
+app.use('/api/group-categories', groupCategoriesRouter);
 
 // Serve uploaded files
 app.use('/uploads', express.static('uploads'));
+
+// Function to process recurring transactions for all users
+async function processAllUsersRecurringTransactions() {
+  try {
+    console.log('Starting recurring transactions check for all users');
+    const users = await User.find({}).populate('categories');
+    
+    for (const user of users) {
+      try {
+        console.log(`Processing recurring transactions for user: ${user._id}`);
+        
+        // Get upcoming transactions first
+        const upcomingTransactions = await getUpcomingRecurringTransactions(user._id);
+        if (upcomingTransactions && upcomingTransactions.length > 0) {
+          console.log(`Sending warnings for ${upcomingTransactions.length} upcoming transactions`);
+          // Pass user's categories to the email service
+          await sendRecurringTransactionWarning(user, upcomingTransactions);
+        }
+        
+        // Process recurring transactions
+        const processedTransactions = await processRecurringTransactions(user._id);
+        
+        // Send confirmation emails for processed transactions
+        if (processedTransactions && processedTransactions.length > 0) {
+          console.log(`Sending confirmations for ${processedTransactions.length} processed transactions`);
+          // Pass user's categories to the email service
+          await sendRecurringTransactionConfirmation(user, processedTransactions);
+        }
+        
+        // Create notifications for processed transactions
+        if (processedTransactions && processedTransactions.length > 0) {
+          await createRecurringNotifications(user._id, processedTransactions);
+        }
+
+      } catch (error) {
+        console.error(`Error processing recurring transactions for user ${user._id}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('Error in processAllUsersRecurringTransactions:', error);
+  }
+}
+
+// Schedule recurring transaction processing every minute
+nodeCron.schedule('* * * * *', async () => {
+  console.log('Running scheduled recurring transactions check');
+  await processAllUsersRecurringTransactions();
+});
 
 // Schedule loan payment processing (every hour)
 nodeCron.schedule('0 * * * *', async () => {
@@ -86,6 +142,7 @@ nodeCron.schedule('0 * * * *', async () => {
     for (const user of users) {
       try {
         await processAutomaticLoanDeductions(user._id);
+        console.log(`Successfully processed loan payments for user ${user._id}`);
       } catch (error) {
         console.error(`Error processing loan payments for user ${user._id}:`, error);
       }
@@ -303,6 +360,20 @@ app.post('/api/auth/logout', (req, res) => {
     res.status(500).json({ message: 'Error during logout' });
   }
 });
+
+// Keep server alive
+setInterval(() => {
+  console.log('Server is alive:', new Date().toISOString());
+  
+  // Ping your MongoDB to keep connection alive
+  mongoose.connection.db.admin().ping((err, result) => {
+    if (err) {
+      console.error('MongoDB ping failed:', err);
+    } else {
+      console.log('MongoDB is alive');
+    }
+  });
+}, 5 * 60 * 1000); // Every 5 minutes
 
 // Error handling middleware
 app.use((err, req, res, next) => {

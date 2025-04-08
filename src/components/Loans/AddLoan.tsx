@@ -400,13 +400,62 @@ const AddLoan: React.FC = () => {
         throw new Error('Invalid purpose selected');
       }
 
-      // Prepare the data for submission
+      // Calculate installment amount based on total amount and payment frequency
+      const totalAmount = Number(formData.amount);
+      let installmentAmount = totalAmount;
+      let numberOfPayments = 1;
+      
+      const startDate = new Date(formData.startDate);
+      const endDate = new Date(formData.endDate);
+      const durationInDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+      
+      switch(formData.paymentFrequency) {
+        case 'daily':
+          numberOfPayments = durationInDays;
+          break;
+        case 'weekly':
+          numberOfPayments = Math.ceil(durationInDays / 7);
+          break;
+        case 'monthly':
+          numberOfPayments = Math.ceil(durationInDays / 30);
+          break;
+        case 'quarterly':
+          numberOfPayments = Math.ceil(durationInDays / 90);
+          break;
+        case 'yearly':
+          numberOfPayments = Math.ceil(durationInDays / 365);
+          break;
+        case 'one-time':
+          numberOfPayments = 1;
+          break;
+      }
+      
+      // Calculate installment amount and round to 2 decimal places
+      installmentAmount = Math.round((totalAmount / numberOfPayments) * 100) / 100;
+
       const submissionData = {
-        ...formData,
-        startDate: formData.startDate ? new Date(formData.startDate).toISOString() : undefined,
-        endDate: formData.endDate ? new Date(formData.endDate).toISOString() : undefined,
-        amount: parseFloat(formData.amount),
-        interestRate: parseFloat(formData.interestRate)
+        title: formData.title,
+        type: formData.type,
+        purpose: formData.purpose,
+        amount: totalAmount,
+        interestRate: Number(formData.interestRate),
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        paymentFrequency: formData.paymentFrequency,
+        description: formData.description,
+        contact: formData.contact,
+        collateral: {
+          ...formData.collateral,
+          value: Number(formData.collateral.value)
+        },
+        guarantor: formData.guarantor,
+        penalties: {
+          ...formData.penalties,
+          rate: Number(formData.penalties.rate),
+          amount: Number(formData.penalties.amount)
+        },
+        remainingAmount: totalAmount,
+        installmentAmount: installmentAmount
       };
 
       const response = await fetch(`${API_BASE_URL}/api/loans`, {

@@ -1,3 +1,4 @@
+import ChatBot from '../components/ChatBot';
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Line, Pie, Bar } from 'react-chartjs-2';
@@ -12,8 +13,10 @@ import {
   TrendingDown,
   PiggyBank,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  MessageSquare
 } from 'lucide-react';
+import { Fab, Tooltip } from '@mui/material';
 import { Chart as ChartJS } from 'chart.js';
 import {
   CategoryScale,
@@ -23,7 +26,7 @@ import {
   BarElement,
   ArcElement,
   Title,
-  Tooltip,
+  Tooltip as ChartTooltip,
   Legend,
   Filler
 } from 'chart.js';
@@ -50,6 +53,7 @@ interface Transaction {
   type: 'income' | 'expense';
   categoryId: string;
   createdAt: string;
+  currency: CurrencyCode;
 }
 
 interface DashboardData {
@@ -80,13 +84,34 @@ ChartJS.register(
   BarElement,
   ArcElement,
   Title,
-  Tooltip,
+  ChartTooltip,
   Legend,
   Filler
 );
 
 function Dashboard() {
   const navigate = useNavigate();
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [user, setUser] = useState(() => {
+    try {
+      const token = localStorage.getItem('token');
+      const userData = localStorage.getItem('user');
+      if (!token || !userData) {
+        return null;
+      }
+      return JSON.parse(userData);
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (!user || !localStorage.getItem('token')) {
+      navigate('/login');
+      return;
+    }
+  }, [user, navigate]);
+
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -129,12 +154,7 @@ function Dashboard() {
     budgetProgress: 0,
     savingsProgress: 0
   });
-  const [convertedAmounts, setConvertedAmounts] = useState({
-    expenses: 0,
-    budgetLimit: 0,
-    savings: 0,
-    savingsGoal: 0
-  });
+  const [convertedAmounts, setConvertedAmounts] = useState<Record<string, number>>({});
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [showSavingsModal, setShowSavingsModal] = useState(false);
   const [newBudgetLimit, setNewBudgetLimit] = useState(0);
@@ -242,7 +262,8 @@ function Dashboard() {
               hour: '2-digit',
               minute: '2-digit',
               hour12: true
-            })
+            }),
+            currency: transaction.currency || userCurrency
           };
         });
 
@@ -329,27 +350,26 @@ function Dashboard() {
   };
 
   useEffect(() => {
-    const calculateTotals = () => {
-      const totals = transactions.reduce(
-        (acc: { totalIncome: number; totalExpense: number }, transaction: Transaction) => {
-          const amount = transaction.amount || 0;
-          if (transaction.type === 'income') {
-            acc.totalIncome += amount;
-          } else {
-            acc.totalExpense += amount;
-          }
-          return acc;
-        },
-        { totalIncome: 0, totalExpense: 0 }
-      );
+    const calculateTotals = async () => {
+      let incomeTotal = 0;
+      let expenseTotal = 0;
 
-      setTotalIncome(totals.totalIncome);
-      setTotalExpenses(totals.totalExpense);
-      setSavingsProgress(((totals.totalIncome - totals.totalExpense) / (settings?.savingsGoal || 1)) * 100);
+      for (const transaction of transactions) {
+        const amount = convertedAmounts[`${transaction.amount}-${transaction.currency}`] ?? transaction.amount;
+        if (transaction.type === 'income') {
+          incomeTotal += amount;
+        } else {
+          expenseTotal += amount;
+        }
+      }
+
+      setTotalIncome(incomeTotal);
+      setTotalExpenses(expenseTotal);
+      setSavingsProgress(((incomeTotal - expenseTotal) / (settings?.savingsGoal || 1)) * 100);
     };
 
     calculateTotals();
-  }, [transactions, settings]);
+  }, [transactions, convertedAmounts, settings]);
 
   // Initial data fetch
   useEffect(() => {
@@ -400,8 +420,6 @@ function Dashboard() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [isUpdating]);
-
-  // Update progress and converted amounts when relevant values change
   useEffect(() => {
     const newProgress = calculateProgress();
     setProgress(newProgress);
@@ -425,7 +443,6 @@ function Dashboard() {
     });
   }, [dashboardData.totalIncome, dashboardData.totalExpense, settings.budgetLimit, settings.savingsGoal]);
 
-  // Update monthly savings whenever income or expenses change
   useEffect(() => {
     const savings = dashboardData.totalIncome - dashboardData.totalExpense;
     setMonthlySavings(savings);
@@ -773,8 +790,13 @@ function Dashboard() {
     };
   };
 
-  const formatAmount = (amount: number) => {
-    return formatCurrency(amount, userCurrency);
+  const formatAmount = (amount: number, currency: CurrencyCode) => {
+    return formatCurrency(amount, currency);
+  };
+
+  const formatConvertedAmount = (amount: number, fromCurrency: CurrencyCode) => {
+    const convertedAmount = convertedAmounts[`${amount}-${fromCurrency}`] ?? amount;
+    return formatCurrency(convertedAmount, userCurrency);
   };
 
   const handleNavigateToSettings = () => {
@@ -869,24 +891,54 @@ function Dashboard() {
         })
       });
 
-      const data = await response.json();
-      console.log('Save savings response:', data); // Debug log
-
       if (!response.ok) {
         throw new Error('Failed to remove savings goal');
       }
 
+      // Update local settings
       setSettings(prev => ({
         ...prev,
         savingsGoal: 0
       }));
 
-      await fetchUserSettings(); // Refresh settings after update
-      toast.success('Monthly savings goal removed successfully');
+      // Close modal and show success message
       setShowSavingsModal(false);
+      toast.success('Monthly savings goal removed successfully!');
     } catch (error) {
       toast.error('Failed to remove monthly savings goal');
       console.error('Error removing savings goal:', error);
+    }
+  };
+  const handleBudgetRemoveGoal = async () => {
+    try {
+      console.log('removing Budget limit:', newBudgetLimit); // Debug log
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...settings,
+          budgetLimit: 0
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to remove budget limit');
+      }
+
+      // Update local settings
+      setSettings(prev => ({
+        ...prev,
+        budgetLimit: 0
+      }));
+
+      // Close modal and show success message
+      setShowBudgetModal(false);
+      toast.success('Monthly budget limit removed successfully!');
+    } catch (error) {
+      toast.error('Failed to remove monthly budget limit');
+      console.error('Error removing budget limit:', error);
     }
   };
 
@@ -980,7 +1032,7 @@ function Dashboard() {
             {title}
           </h3>
           <p className="text-2xl font-semibold text-gray-700 dark:text-gray-200">
-            {formatAmount(amount)}
+            {formatAmount(amount, userCurrency)}
           </p>
         </div>
         <div className="p-3 bg-gray-100 dark:bg-gray-700 rounded-full">
@@ -1017,6 +1069,54 @@ function Dashboard() {
       )}
     </motion.div>
   );
+
+  useEffect(() => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+    console.log('User data initialized:', user); // Debug log
+  }, [user]);
+
+  // Add budget warning check
+  useEffect(() => {
+    const checkBudgetWarning = () => {
+      if (settings.budgetLimit > 0 && settings.notifications?.budgetAlerts && totalExpenses >= settings.budgetLimit) {
+        toast.error(`Monthly expenses (${formatAmount(totalExpenses, userCurrency)}) have exceeded your budget limit (${formatAmount(settings.budgetLimit, userCurrency)})`);
+      }
+    };
+
+    checkBudgetWarning();
+  }, [settings.budgetLimit, settings.notifications?.budgetAlerts, totalExpenses, userCurrency]);
+
+  useEffect(() => {
+    const updateConvertedAmounts = async () => {
+      const newConvertedAmounts: Record<string, number> = {};
+      
+      for (const transaction of transactions) {
+        if (transaction.currency === userCurrency) {
+          newConvertedAmounts[`${transaction.amount}-${transaction.currency}`] = transaction.amount;
+          continue;
+        }
+
+        try {
+          const converted = await convertCurrencyWithRates(
+            transaction.amount,
+            transaction.currency,
+            userCurrency
+          );
+          newConvertedAmounts[`${transaction.amount}-${transaction.currency}`] = converted;
+        } catch (error) {
+          console.error('Error converting amount:', error);
+          newConvertedAmounts[`${transaction.amount}-${transaction.currency}`] = transaction.amount;
+        }
+      }
+
+      setConvertedAmounts(newConvertedAmounts);
+    };
+
+    updateConvertedAmounts();
+  }, [transactions, userCurrency]);
 
   if (loading) {
     return (
@@ -1074,6 +1174,37 @@ function Dashboard() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar />
       <Toaster position="top-center" />
+      {user && localStorage.getItem('token') && (
+        <>
+          <ChatBot 
+            isOpen={isChatOpen} 
+            onClose={() => setIsChatOpen(false)} 
+            userId={user.id} 
+          />
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ 
+              type: "spring",
+              stiffness: 260,
+              damping: 20,
+              duration: 0.6 
+            }}
+            className="fixed bottom-6 right-6 z-50"
+          >
+            <button
+              onClick={() => setIsChatOpen(true)}
+              className="group relative flex items-center justify-center p-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-full shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 ease-in-out"
+            >
+              <span className="pointer-events-none absolute -top-10 right-0 bg-white text-gray-800 px-3 py-1 rounded-full text-sm font-medium opacity-0 group-hover:opacity-100 transform group-hover:-translate-y-1 transition-all duration-200 whitespace-nowrap shadow-md">
+                Ask AI Advisor
+              </span>
+              <MessageSquare className="w-6 h-6 text-white transform group-hover:rotate-12 transition-transform duration-200" />
+              <span className="pointer-events-none absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-10 h-1 bg-blue-400 rounded-full opacity-0 group-hover:opacity-75 blur-sm transition-opacity duration-200"></span>
+            </button>
+          </motion.div>
+        </>
+      )}
       <div className="container mx-auto px-4 mt-8">
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -1100,7 +1231,7 @@ function Dashboard() {
                   </div>
                 </div>
                 <p className={`text-2xl font-semibold ${totalIncome - totalExpenses < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                  {formatAmount(totalIncome - totalExpenses)}
+                  {formatAmount(totalIncome - totalExpenses, userCurrency)}
                 </p>
               </div>
               <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-full">
@@ -1137,7 +1268,7 @@ function Dashboard() {
                   Total Income
                 </h3>
                 <p className="text-2xl font-semibold text-green-600 dark:text-green-400">
-                  {formatAmount(totalIncome)}
+                  {formatAmount(totalIncome, userCurrency)}
                 </p>
               </div>
               <div className="p-3 bg-green-100 dark:bg-green-900 rounded-full">
@@ -1163,7 +1294,7 @@ function Dashboard() {
                   Total Expenses
                 </h3>
                 <p className="text-2xl font-semibold text-red-600 dark:text-red-400">
-                  {formatAmount(totalExpenses)}
+                  {formatAmount(totalExpenses, userCurrency)}
                 </p>
               </div>
               <div className="p-3 bg-red-100 dark:bg-red-900 rounded-full">
@@ -1202,7 +1333,7 @@ function Dashboard() {
                 </div>
                 {settings.savingsGoal ? (
                   <p className={`text-2xl font-semibold ${monthlySavings < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                    {formatAmount(Math.abs(monthlySavings))}
+                    {formatAmount(Math.abs(monthlySavings), userCurrency)}
                   </p>
                 ) : (
                   <div className="flex flex-col gap-2">
@@ -1214,7 +1345,7 @@ function Dashboard() {
                         setNewSavingsGoal(settings.savingsGoal);
                         setShowSavingsModal(true);
                       }}
-                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition-colors"
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
                     >
                       Set Goal
                     </button>
@@ -1251,7 +1382,7 @@ function Dashboard() {
         </div>
 
         {/* Budget Warning */}
-        {totalExpenses > settings.budgetLimit && (
+        {settings.budgetLimit > 0 && settings.notifications?.budgetAlerts && totalExpenses >= settings.budgetLimit && (
           <motion.div 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1260,7 +1391,7 @@ function Dashboard() {
             <div className="flex items-center">
               <AlertTriangle className="w-5 h-5 mr-2" />
               <p>
-                <span className="font-bold">Warning:</span> You've exceeded your monthly budget by {formatAmount(totalExpenses - settings.budgetLimit)}
+                <span className="font-bold">Warning:</span> You've exceeded your monthly budget by {formatAmount(totalExpenses - settings.budgetLimit, userCurrency)}
               </p>
             </div>
           </motion.div>
@@ -1274,6 +1405,25 @@ function Dashboard() {
               <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
                 Budget Progress
               </h3>
+              {settings.budgetLimit > 0 ? (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setNewBudgetLimit(settings.budgetLimit);
+                    setShowBudgetModal(true);
+                  }}
+                  className="px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transform-gpu"
+                >
+                  Edit Budget
+                </button>
+                <button
+                  onClick={handleBudgetRemoveGoal}
+                  className="px-3 py-1 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transform-gpu"
+                >
+                  Remove Budget
+                </button>
+              </div>
+            ) : (
               <button
                 onClick={() => {
                   setNewBudgetLimit(settings.budgetLimit);
@@ -1281,9 +1431,11 @@ function Dashboard() {
                 }}
                 className="px-3 py-1 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transform-gpu"
               >
-                {settings.budgetLimit === 0 ? 'Set Budget' : 'Edit Budget'}
+                Set Budget
               </button>
-            </div>
+            )}
+          </div>
+              
             {settings.budgetLimit === 0 ? (
               <div className="text-center py-4 text-gray-500 dark:text-gray-400">
                 <p className="text-sm">Set a monthly budget to track your spending</p>
@@ -1293,7 +1445,7 @@ function Dashboard() {
                 <div className="flex mb-2 items-center justify-between">
                   <div>
                     <span className="text-sm font-semibold inline-block text-blue-600">
-                      Budget Progress ({formatCurrency(convertedAmounts.expenses, userCurrency)} / {formatCurrency(convertedAmounts.budgetLimit, userCurrency)})
+                      Budget Progress ({formatAmount(convertedAmounts.expenses, userCurrency)} / {formatAmount(convertedAmounts.budgetLimit, userCurrency)})
                     </span>
                   </div>
                   <div className="text-right">
@@ -1318,6 +1470,7 @@ function Dashboard() {
               </div>
             )}
           </div>
+
 
           {/* Savings Progress */}
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
@@ -1354,7 +1507,7 @@ function Dashboard() {
                 <div className="flex mb-2 items-center justify-between">
                   <div>
                     <span className="text-sm font-semibold inline-block text-green-600">
-                      Savings Progress ({formatAmount(Math.abs(monthlySavings))} / {formatAmount(settings.savingsGoal)})
+                      Savings Progress ({formatAmount(Math.abs(monthlySavings), userCurrency)} / {formatAmount(settings.savingsGoal, userCurrency)})
                     </span>
                   </div>
                   <div className="text-right">
@@ -1519,7 +1672,7 @@ function Dashboard() {
                 Income Distribution
               </h3>
               <div className="text-sm text-gray-500 dark:text-gray-400">
-                Total: {formatCurrency(totalIncome, userCurrency)}
+                Total: {formatAmount(totalIncome, userCurrency)}
               </div>
             </div>
             <div className="h-[400px] relative">
@@ -1561,14 +1714,13 @@ function Dashboard() {
             className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 min-h-[400px]"
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.4 }}
           >
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
                 Expense Distribution
               </h3>
               <div className="text-sm text-gray-500 dark:text-gray-400">
-                Total: {formatCurrency(totalExpenses, userCurrency)}
+                Total: {formatAmount(totalExpenses, userCurrency)}
               </div>
             </div>
             <div className="h-[400px] relative">
@@ -1757,18 +1909,23 @@ function Dashboard() {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                         transaction.type === 'income'
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                          ? 'bg-green-100 dark:bg-green-900/30 dark:text-green-400'
+                          : 'bg-red-100 dark:bg-red-900/30 dark:text-red-400'
                       }`}>
                         {getCategoryById(transaction.categoryId)?.name || 'Other'}
                       </span>
                     </td>
                     <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
-                      transaction.type === 'income'
-                        ? 'text-green-600 dark:text-green-400'
+                      transaction.type === 'income' 
+                        ? 'text-green-600 dark:text-green-400' 
                         : 'text-red-600 dark:text-red-400'
                     }`}>
-                      {transaction.type === 'income' ? '+' : '-'}{transaction.formattedAmount}
+                      {transaction.type === 'income' ? '+' : '-'} {formatConvertedAmount(transaction.amount, transaction.currency)}
+                      {transaction.currency !== userCurrency && (
+                        <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
+                          ({formatAmount(transaction.amount, transaction.currency)})
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1783,6 +1940,7 @@ function Dashboard() {
           </div>
         </motion.div>
       </div>
+      
       {/* Budget Modal */}
       {showBudgetModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
@@ -1794,9 +1952,7 @@ function Dashboard() {
                 {/* Header with icon */}
                 <div className="bg-gradient-to-r from-blue-500 to-blue-600 px-4 py-6 sm:px-6 text-center">
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/10 backdrop-blur">
-                    <svg className="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
+                    <PiggyBank className="h-6 w-6 text-white" />
                   </div>
                   <h2 className="mt-4 text-xl font-semibold text-white">Set Monthly Budget Limit</h2>
                 </div>
@@ -1805,23 +1961,17 @@ function Dashboard() {
                 <div className="px-4 py-6 sm:px-6">
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <label className="block text-sm text-gray-600 dark:text-gray-400 mb-2">
                         Enter your monthly budget limit in {userCurrency}
                       </label>
-                      <div className="mt-1 relative rounded-md shadow-sm">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <span className="text-gray-500 sm:text-sm">{userCurrency}</span>
-                        </div>
-                        <input
-                          type="number"
-                          value={newBudgetLimit}
-                          onChange={(e) => setNewBudgetLimit(Number(e.target.value))}
-                          className="block w-full pl-12 pr-4 py-3 border-gray-300 dark:border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-lg"
-                          placeholder="0.00"
-                          min="0"
-                          step="0.01"
-                        />
-                      </div>
+                      <input
+                        type="number"
+                        value={newBudgetLimit}
+                        onChange={(e) => setNewBudgetLimit(Math.max(1, Number(e.target.value)))}
+                        className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        placeholder="Enter amount greater than 0"
+                        min="1"
+                      />
                     </div>
                   </div>
                 </div>
@@ -1832,6 +1982,7 @@ function Dashboard() {
                     type="button"
                     onClick={handleSaveBudget}
                     className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+                    disabled={newBudgetLimit <= 0}
                   >
                     Save Budget
                   </button>
@@ -1848,7 +1999,7 @@ function Dashboard() {
           </div>
         </div>
       )}
-
+      
       {/* Savings Modal */}
       {showSavingsModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
@@ -1874,19 +2025,14 @@ function Dashboard() {
                       <label className="block text-sm text-gray-600 dark:text-gray-400 mb-2">
                         Enter your monthly savings target in INR
                       </label>
-                      <div className="mt-1 relative rounded-md shadow-sm">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <span className="text-gray-500 sm:text-sm">{userCurrency}</span>
-                        </div>
-                        <input
-                          type="number"
-                          value={newSavingsGoal}
-                          onChange={(e) => setNewSavingsGoal(Math.max(1, Number(e.target.value)))}
-                          className="block w-full pl-12 pr-4 py-3 border-gray-300 dark:border-gray-600 rounded-lg focus:ring-green-500 focus:border-green-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-lg"
-                          placeholder="Enter amount greater than 0"
-                          min="1"
-                        />
-                      </div>
+                      <input
+                        type="number"
+                        value={newSavingsGoal}
+                        onChange={(e) => setNewSavingsGoal(Math.max(1, Number(e.target.value)))}
+                        className="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        placeholder="Enter amount greater than 0"
+                        min="1"
+                      />
                     </div>
                   </div>
                 </div>

@@ -25,33 +25,31 @@ export async function processMissedTransactions(userId) {
     const processedTransactions = [];
     const errors = [];
 
+    // Sort transactions by their next due date
+    activeTransactions.sort((a, b) => new Date(a.nextDueDate) - new Date(b.nextDueDate));
+
     for (const recurringTx of activeTransactions) {
       try {
         console.log(`Processing transaction: ${recurringTx.title} (${recurringTx._id})`);
         console.log(`Last processed: ${recurringTx.lastProcessed}, Next due: ${recurringTx.nextDueDate}`);
         
-        // Get the reference date (either last processed or start date)
         const startDate = new Date(recurringTx.startDate);
         const lastProcessed = recurringTx.lastProcessed ? new Date(recurringTx.lastProcessed) : null;
         const nextDueDate = new Date(recurringTx.nextDueDate);
         
-        // If next due date is in the future, skip this transaction
         if (nextDueDate > now) {
           console.log(`Next due date ${nextDueDate} is in the future, skipping`);
           continue;
         }
 
-        // For first-time processing
         let currentDate = lastProcessed || startDate;
-        
-        // Ensure we don't create transactions before the start date
         if (currentDate < startDate) {
           currentDate = startDate;
         }
 
         console.log(`Reference date for processing: ${currentDate}`);
 
-        // Process all missed occurrences up to now
+        // Process each missed occurrence one at a time
         while (currentDate <= now) {
           const startOfDay = new Date(currentDate);
           startOfDay.setHours(0, 0, 0, 0);
@@ -59,7 +57,6 @@ export async function processMissedTransactions(userId) {
           const endOfDay = new Date(startOfDay);
           endOfDay.setHours(23, 59, 59, 999);
 
-          // Check if transaction already exists for this date
           const existingTransaction = await Transaction.findOne({
             userId,
             recurringTransactionId: recurringTx._id,
@@ -69,10 +66,7 @@ export async function processMissedTransactions(userId) {
             }
           });
 
-          if (existingTransaction) {
-            console.log(`Transaction already exists for date: ${currentDate}`);
-          } else {
-            // For monthly/yearly transactions, check if enough time has passed
+          if (!existingTransaction) {
             let shouldProcess = true;
             if (recurringTx.frequency === 'monthly' || recurringTx.frequency === 'yearly') {
               const lastProcessedDate = lastProcessed || startDate;
@@ -86,7 +80,6 @@ export async function processMissedTransactions(userId) {
             if (shouldProcess) {
               console.log(`Creating transaction for date: ${currentDate}`);
               
-              // Create the missed transaction
               const transaction = new Transaction({
                 userId: recurringTx.userId,
                 recurringTransactionId: recurringTx._id,
@@ -99,41 +92,47 @@ export async function processMissedTransactions(userId) {
                 originalCurrency: recurringTx.originalCurrency,
                 categoryId: recurringTx.categoryId,
                 icon: recurringTx.icon,
-                date: currentDate,
-                isRecurring: true,
+                date: new Date(currentDate),
+                isRecurring: true
               });
 
-              const savedTransaction = await transaction.save();
-              console.log(`Created transaction: ${savedTransaction._id}`);
-              processedTransactions.push(savedTransaction);
+              // Save transaction
+              await transaction.save();
+
+              // Update recurring transaction's last processed date
+              recurringTx.lastProcessed = currentDate;
+              await recurringTx.save();
+
+              // Send email notification with correct financial data
+              try {
+                const populatedUser = await User.findById(userId).populate('categories');
+                await sendRecurringTransactionConfirmation(populatedUser, transaction);
+                
+                // Add delay between processing transactions to ensure correct order
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              } catch (emailError) {
+                console.error('Error sending confirmation email:', emailError);
+              }
+
+              processedTransactions.push(transaction);
             }
           }
 
-          // Move to next occurrence based on frequency
-          switch (recurringTx.frequency) {
-            case 'daily':
-              currentDate.setDate(currentDate.getDate() + 1);
-              break;
-            case 'weekly':
-              currentDate.setDate(currentDate.getDate() + 7);
-              break;
-            case 'monthly':
-              currentDate.setMonth(currentDate.getMonth() + 1);
-              break;
-            case 'yearly':
-              currentDate.setFullYear(currentDate.getFullYear() + 1);
-              break;
-            default:
-              currentDate.setDate(currentDate.getDate() + 1);
+          // Increment date based on frequency
+          if (recurringTx.frequency === 'daily') {
+            currentDate.setDate(currentDate.getDate() + 1);
+          } else if (recurringTx.frequency === 'weekly') {
+            currentDate.setDate(currentDate.getDate() + 7);
+          } else if (recurringTx.frequency === 'monthly') {
+            currentDate.setMonth(currentDate.getMonth() + 1);
+          } else if (recurringTx.frequency === 'yearly') {
+            currentDate.setFullYear(currentDate.getFullYear() + 1);
           }
         }
 
-        // Calculate next due date
-        const nextDate = new Date(currentDate);
-        recurringTx.lastProcessed = now;
-        recurringTx.nextDueDate = nextDate;
+        // Update next due date
+        recurringTx.nextDueDate = calculateNextDueDate(new Date(), recurringTx.frequency);
         await recurringTx.save();
-        console.log(`Updated recurring transaction. Next due date: ${nextDate}`);
 
       } catch (error) {
         console.error(`Error processing recurring transaction ${recurringTx._id}:`, error);
@@ -141,19 +140,10 @@ export async function processMissedTransactions(userId) {
       }
     }
 
-    // Send email notification if any transactions were processed
-    if (processedTransactions.length > 0) {
-      try {
-        await sendRecurringTransactionConfirmation(user, processedTransactions);
-      } catch (error) {
-        console.error('Error sending email notification:', error);
-      }
-    }
-
     return {
       success: true,
-      processedCount: processedTransactions.length,
-      errors: errors
+      processedTransactions,
+      errors
     };
 
   } catch (error) {
@@ -310,19 +300,34 @@ export async function getUpcomingRecurringTransactions(userId, minutesThreshold 
 
     console.log(`Checking for upcoming transactions between ${now.toISOString()} and ${thresholdTime.toISOString()}`);
 
-    const transactions = await Transaction.find({
+    // Find recurring transactions that are due soon
+    const transactions = await RecurringTransaction.find({
       userId,
-      isRecurring: true,
-      'recurringDetails.nextDueDate': {
+      isActive: true,
+      nextDueDate: {
         $gte: now,
         $lte: thresholdTime
       }
     })
     .populate('categoryId')
-    .sort({ 'recurringDetails.nextDueDate': 1 });
+    .sort({ nextDueDate: 1 });
 
-    console.log(`Found ${transactions.length} upcoming transactions`);
-    return transactions;
+    console.log(`Found ${transactions.length} upcoming recurring transactions`);
+    
+    // Map transactions to include all necessary information
+    const mappedTransactions = transactions.map(tx => ({
+      _id: tx._id,
+      title: tx.title,
+      amount: tx.amount,
+      currency: tx.currency,
+      type: tx.type,
+      categoryId: tx.categoryId,
+      description: tx.description,
+      nextDueDate: tx.nextDueDate,
+      frequency: tx.frequency
+    }));
+
+    return mappedTransactions;
   } catch (error) {
     console.error('Error getting upcoming transactions:', error);
     throw error;
@@ -381,4 +386,25 @@ export async function scheduleNextTransactionCheck(userId) {
     console.error('Error scheduling next check:', error);
     throw error;
   }
+}
+
+function calculateNextDueDate(currentDate, frequency) {
+  let nextDueDate = new Date(currentDate);
+  switch (frequency) {
+    case 'daily':
+      nextDueDate.setDate(nextDueDate.getDate() + 1);
+      break;
+    case 'weekly':
+      nextDueDate.setDate(nextDueDate.getDate() + 7);
+      break;
+    case 'monthly':
+      nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+      break;
+    case 'yearly':
+      nextDueDate.setFullYear(nextDueDate.getFullYear() + 1);
+      break;
+    default:
+      throw new Error(`Invalid frequency: ${frequency}`);
+  }
+  return nextDueDate;
 }

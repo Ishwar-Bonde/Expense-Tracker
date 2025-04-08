@@ -6,7 +6,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import Navbar from '../components/Navbar';
 import Loading from '../components/Loading';
-import { formatCurrency, CURRENCIES, CurrencyCode } from '../utils/currency';
+import { formatCurrency, convertCurrencyWithRates, getUserCurrency, CurrencyCode } from '../utils/currency';
 import { motion, AnimatePresence } from 'framer-motion';
 import 'react-toastify/dist/ReactToastify.css';
 import { fetchWithAuth } from '../utils/fetchInterceptor';
@@ -23,12 +23,12 @@ interface Transaction {
   title: string;
   description: string;
   amount: number;
-  formattedAmount: string;
   date: string;
   createdAt: string;
   timestamp: number;
-  currency: string;
+  currency: CurrencyCode;
   categoryId: string;
+  convertedAmount?: number;
 }
 
 type SortField = 'date' | 'amount' | 'createdAt';
@@ -104,16 +104,38 @@ const Transactions: React.FC = () => {
   const fetchTransactions = async () => {
     try {
       setIsLoading(true);
-      const response = await fetchWithAuth('/api/transactions');
+      const response = await fetchWithAuth(`${API_BASE_URL}/api/transactions`);
+      const data = await response.json();
       
       if (!response.ok) {
-        throw new Error('Failed to fetch transactions');
+        throw new Error(data.message || 'Failed to fetch transactions');
       }
-      
-      const data = await response.json();
-      setTransactions(data);
+
+      // Convert amounts before setting transactions
+      const currency = await getUserCurrency();
+      const transactionsWithConversion = await Promise.all(
+        data.map(async (transaction: Transaction) => {
+          if (transaction.currency === currency) {
+            return { ...transaction, convertedAmount: transaction.amount };
+          }
+          try {
+            const convertedAmount = await convertCurrencyWithRates(
+              transaction.amount,
+              transaction.currency,
+              currency
+            );
+            return { ...transaction, convertedAmount };
+          } catch (error) {
+            console.error('Error converting amount:', error);
+            return { ...transaction, convertedAmount: transaction.amount };
+          }
+        })
+      );
+
+      setTransactions(transactionsWithConversion);
     } catch (error) {
-      setError('Failed to fetch transactions');
+      console.error('Error fetching transactions:', error);
+      toast.error('Failed to fetch transactions');
     } finally {
       setIsLoading(false);
     }
@@ -133,6 +155,52 @@ const Transactions: React.FC = () => {
     loadCategories();
     fetchTransactions();
   }, [navigate]);
+
+  // Initialize user currency and fetch data
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const currency = await getUserCurrency();
+        setUserCurrency(currency);
+        await fetchTransactions();
+      } catch (error) {
+        console.error('Error initializing:', error);
+        toast.error('Failed to initialize');
+      }
+    };
+    
+    init();
+  }, []);
+
+  // Update converted amounts when currency changes
+  useEffect(() => {
+    if (transactions.length > 0) {
+      const updateAmounts = async () => {
+        const updatedTransactions = await Promise.all(
+          transactions.map(async (transaction) => {
+            if (transaction.currency === userCurrency) {
+              return { ...transaction, convertedAmount: transaction.amount };
+            }
+            
+            try {
+              const convertedAmount = await convertCurrencyWithRates(
+                transaction.amount,
+                transaction.currency,
+                userCurrency
+              );
+              return { ...transaction, convertedAmount };
+            } catch (error) {
+              console.error('Error converting amount:', error);
+              return { ...transaction, convertedAmount: transaction.amount };
+            }
+          })
+        );
+        setTransactions(updatedTransactions);
+      };
+      
+      updateAmounts();
+    }
+  }, [userCurrency]);
 
   // Handle currency updates
   useEffect(() => {
@@ -266,7 +334,9 @@ const Transactions: React.FC = () => {
     })
     .sort((a, b) => {
       if (sortField === 'amount') {
-        return sortOrder === 'desc' ? b.amount - a.amount : a.amount - b.amount;
+        const amountA = a.convertedAmount ?? a.amount;
+        const amountB = b.convertedAmount ?? b.amount;
+        return sortOrder === 'desc' ? amountB - amountA : amountA - amountB;
       }
       // Default sort by date
       const dateA = new Date(a.createdAt).getTime();
@@ -342,9 +412,7 @@ const Transactions: React.FC = () => {
       setIsLoading(true);
       const response = await fetchWithAuth(`${API_BASE_URL}/api/transactions/bulk-delete`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionIds: selectedTransactions })
       });
 
@@ -383,7 +451,8 @@ const Transactions: React.FC = () => {
 
   // Format transaction amount
   const formatTransactionAmount = (transaction: Transaction) => {
-    return formatCurrency(transaction.amount, userCurrency);
+    const amount = transaction.convertedAmount ?? transaction.amount;
+    return formatCurrency(amount, userCurrency);
   };
 
   // Get category name
@@ -409,24 +478,35 @@ const Transactions: React.FC = () => {
     // First row is headers
     const headers = {
       date: 'Date',
+      time: 'Time',
       title: 'Title',
-      amount: 'Amount',
-      type: 'Type',
-      currency: 'Currency',
       description: 'Description',
+      originalAmount: 'Original Amount',
+      originalCurrency: 'Original Currency',
+      convertedAmount: 'Converted Amount',
+      displayCurrency: 'Display Currency',
+      type: 'Type',
       category: 'Category'
     };
 
     // Convert transactions to CSV format
-    const data = transactions.map(t => ({
-      [headers.date]: new Date(t.date).toLocaleDateString(),
-      [headers.title]: t.title,
-      [headers.amount]: t.amount,
-      [headers.type]: t.type,
-      [headers.currency]: t.currency,
-      [headers.description]: t.description || '',
-      [headers.category]: getCategoryName(t.categoryId)
-    }));
+    const data = filteredAndSortedTransactions.map(t => {
+      const transactionDate = new Date(t.date);
+      const category = categories.find(c => c.id === t.categoryId);
+      
+      return {
+        [headers.date]: transactionDate.toLocaleDateString('en-IN'),
+        [headers.time]: new Date(t.createdAt).toLocaleTimeString('en-IN'),
+        [headers.title]: t.title,
+        [headers.description]: t.description || '',
+        [headers.originalAmount]: t.amount,
+        [headers.originalCurrency]: t.currency,
+        [headers.convertedAmount]: t.convertedAmount ?? t.amount,
+        [headers.displayCurrency]: userCurrency,
+        [headers.type]: t.type.charAt(0).toUpperCase() + t.type.slice(1),
+        [headers.category]: category?.name || 'Uncategorized'
+      };
+    });
 
     return data;
   };
@@ -1299,6 +1379,11 @@ const Transactions: React.FC = () => {
                               : 'text-red-600 dark:text-red-400'
                           }`}>
                             {transaction.type === 'income' ? '+' : '-'} {formatTransactionAmount(transaction)}
+                            {transaction.currency !== userCurrency && (
+                              <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
+                                ({formatCurrency(transaction.amount, transaction.currency)})
+                              </span>
+                            )}
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-500">
                             <button

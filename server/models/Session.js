@@ -1,5 +1,16 @@
 import mongoose from 'mongoose';
 
+const deviceInfoSchema = new mongoose.Schema({
+    userAgent: {
+        type: String,
+        required: true
+    },
+    ip: {
+        type: String,
+        required: true
+    }
+}, { _id: false });
+
 const sessionSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -11,7 +22,7 @@ const sessionSchema = new mongoose.Schema({
         required: true
     },
     deviceInfo: {
-        type: String,
+        type: deviceInfoSchema,
         required: true
     },
     lastActivity: {

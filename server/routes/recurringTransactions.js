@@ -5,6 +5,7 @@ import Transaction from '../models/Transaction.js';
 import User from '../models/User.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { processRecurringTransactions, processMissedTransactions } from '../utils/recurringTransactions.js';
+import { sendRecurringTransactionConfirmation } from '../utils/emailService.js';
 import axios from 'axios';
 
 const router = express.Router();
@@ -27,9 +28,6 @@ async function convertCurrency(amount, fromCurrency, toCurrency) {
 // Get all recurring transactions for a user
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    // Process any pending transactions first
-    await processMissedTransactions(req.user.id);
-    
     const user = await User.findById(req.user.id).select('defaultCurrency');
     const userCurrency = user.defaultCurrency || 'USD';
 
@@ -162,8 +160,31 @@ const validateTransactionData = (data) => {
   return errors;
 };
 
+// Calculate next due date based on frequency
+const calculateNextDueDate = (fromDate, frequency) => {
+  const nextDue = new Date(fromDate);
+  switch (frequency) {
+    case 'daily':
+      nextDue.setDate(nextDue.getDate() + 1);
+      break;
+    case 'weekly':
+      nextDue.setDate(nextDue.getDate() + 7);
+      break;
+    case 'monthly':
+      nextDue.setMonth(nextDue.getMonth() + 1);
+      break;
+    case 'yearly':
+      nextDue.setFullYear(nextDue.getFullYear() + 1);
+      break;
+  }
+  return nextDue;
+};
+
 // Create a new recurring transaction
 router.post('/', authenticateToken, async (req, res) => {
+  let recurringTransaction = null;
+  let immediateTransaction = null;
+
   try {
     const user = await User.findById(req.user.id).select('defaultCurrency');
     const userCurrency = user.defaultCurrency || 'USD';
@@ -178,6 +199,10 @@ router.post('/', authenticateToken, async (req, res) => {
       convertedAmount = await convertCurrency(originalAmount, originalCurrency, userCurrency);
     }
 
+    const startDate = new Date(req.body.startDate);
+    startDate.setHours(0, 0, 0, 0);
+
+    // Create the recurring transaction data first
     const transactionData = {
       ...req.body,
       amount: convertedAmount,
@@ -185,51 +210,82 @@ router.post('/', authenticateToken, async (req, res) => {
       originalAmount: originalAmount,
       originalCurrency: originalCurrency,
       userId: req.user.id,
-      nextDueDate: (() => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        const startDate = new Date(req.body.startDate);
-        startDate.setHours(0, 0, 0, 0);
-
-        // If start date is today, calculate next due date from tomorrow
-        if (startDate.toISOString().split('T')[0] === today.toISOString().split('T')[0]) {
-          startDate.setDate(startDate.getDate() + 1);
-        }
-        
-        const nextDue = new Date(startDate);
-        switch (req.body.frequency) {
-          case 'daily':
-            nextDue.setDate(nextDue.getDate() + 1);
-            break;
-          case 'weekly':
-            nextDue.setDate(nextDue.getDate() + 7);
-            break;
-          case 'monthly':
-            nextDue.setMonth(nextDue.getMonth() + 1);
-            break;
-          case 'yearly':
-            nextDue.setFullYear(nextDue.getFullYear() + 1);
-            break;
-        }
-        return nextDue;
-      })()
+      nextDueDate: calculateNextDueDate(startDate, req.body.frequency),
+      lastProcessedDate: startDate // Set the last processed date to start date
     };
 
-    console.log('Creating transaction with data:', transactionData);
-
+    // Validate the data before proceeding
     const errors = validateTransactionData(transactionData);
     if (errors.length > 0) {
       return res.status(400).json({ errors });
     }
 
-    const recurringTransaction = new RecurringTransaction(transactionData);
+    // Create and save the recurring transaction first
+    recurringTransaction = new RecurringTransaction({
+      ...transactionData,
+      description: transactionData.description || generateDefaultDescription(transactionData.frequency, transactionData.startDate, transactionData.endDate)
+    });
     await recurringTransaction.save();
 
-    res.status(201).json(recurringTransaction);
+    // Create immediate transaction for the start date
+    console.log('Creating immediate transaction for start date:', startDate);
+    immediateTransaction = new Transaction({
+      userId: req.user.id,
+      title: req.body.title,
+      description: transactionData.description || generateDefaultDescription(transactionData.frequency, transactionData.startDate, transactionData.endDate),
+      amount: convertedAmount,
+      currency: userCurrency,
+      type: req.body.type,
+      categoryId: req.body.categoryId,
+      date: startDate,
+      isRecurring: true,
+      recurringTransactionId: recurringTransaction._id
+    });
+
+    // Save the immediate transaction
+    await immediateTransaction.save();
+
+    // Wait a moment for transaction to be fully saved
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    try {
+      // Send confirmation email for the immediate transaction
+      const populatedUser = await User.findById(req.user.id).populate('categories');
+      const populatedTransaction = await Transaction.findById(immediateTransaction._id);
+      await sendRecurringTransactionConfirmation(populatedUser, populatedTransaction);
+    } catch (emailError) {
+      // Log email error but don't fail the transaction
+      console.error('Error sending confirmation email:', emailError);
+    }
+
+    // Send success response
+    res.status(201).json({
+      success: true,
+      recurringTransaction,
+      immediateTransaction,
+      message: 'Recurring transaction created and first payment processed'
+    });
+
   } catch (error) {
     console.error('Error creating recurring transaction:', error);
-    res.status(500).json({ message: 'Server error' });
+    
+    // Try to rollback if partial creation occurred
+    try {
+      if (immediateTransaction?._id) {
+        await Transaction.findByIdAndDelete(immediateTransaction._id);
+      }
+      if (recurringTransaction?._id) {
+        await RecurringTransaction.findByIdAndDelete(recurringTransaction._id);
+      }
+    } catch (rollbackError) {
+      console.error('Error during rollback:', rollbackError);
+    }
+
+    // Send error response
+    res.status(500).json({ 
+      success: false,
+      message: 'Failed to create recurring transaction. Please try again.' 
+    });
   }
 });
 
@@ -422,5 +478,72 @@ router.get('/upcoming', authenticateToken, async (req, res) => {
     });
   }
 });
+
+// Helper function to generate default description
+function generateDefaultDescription(frequency, startDate, endDate) {
+  const formattedStartDate = new Date(startDate).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+
+  let frequencyEmoji, frequencyText;
+  switch (frequency.toLowerCase()) {
+    case 'daily':
+      frequencyEmoji = '📅';
+      frequencyText = `⚡ Happens Every Single Day! ⚡`;
+      break;
+    case 'weekly':
+      frequencyEmoji = '🗓️';
+      const dayOfWeek = new Date(startDate).toLocaleDateString('en-IN', { weekday: 'long' });
+      frequencyText = `🌟 See You Every ${dayOfWeek}! 🌟`;
+      break;
+    case 'monthly':
+      frequencyEmoji = '📆';
+      const dayOfMonth = new Date(startDate).getDate();
+      const suffix = getDaySuffix(dayOfMonth);
+      frequencyText = `💫 Monthly Magic on the ${dayOfMonth}${suffix}! 💫`;
+      break;
+    case 'yearly':
+      frequencyEmoji = '🎊';
+      const monthAndDay = new Date(startDate).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'long'
+      });
+      frequencyText = `🎉 Annual Celebration on ${monthAndDay}! 🎉`;
+      break;
+  }
+
+  let description = `${frequencyEmoji} Auto-Scheduled: ${frequencyText}\n`;
+  description += `🚀 First Transaction: ${formattedStartDate}`;
+  
+  if (endDate) {
+    const formattedEndDate = new Date(endDate).toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+    description += `\n🎯 Final Transaction: ${formattedEndDate}`;
+  }
+
+  return description;
+}
+
+// Helper function to get day suffix (1st, 2nd, 3rd, etc.)
+function getDaySuffix(day) {
+  if (day >= 11 && day <= 13) {
+    return 'th';
+  }
+  switch (day % 10) {
+    case 1:
+      return 'st';
+    case 2:
+      return 'nd';
+    case 3:
+      return 'rd';
+    default:
+      return 'th';
+  }
+}
 
 export default router;

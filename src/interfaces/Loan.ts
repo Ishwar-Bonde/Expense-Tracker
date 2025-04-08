@@ -22,7 +22,7 @@ export interface Payment {
 }
 
 export interface Loan {
-  _id?: string;
+  _id: string;
   userId: string;
   title: string;
   description?: string;
