@@ -37,7 +37,6 @@ const categorySchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-// Add compound index to ensure unique categories per user
 categorySchema.index({ userId: 1, name: 1, type: 1 }, { unique: true });
 
 const Category = mongoose.model('Category', categorySchema);
