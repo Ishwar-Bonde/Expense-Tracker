@@ -5,7 +5,6 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load environment variables from the root directory
 dotenv.config({ path: join(__dirname, '..', '.env') });
 
 import express from 'express';
@@ -47,12 +46,11 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Enable pre-flight requests for all routes
 app.options('*', cors());
 
 app.use(express.json());
 
-// Connect to MongoDB
+// MongoDB
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((err) => {
@@ -60,7 +58,6 @@ mongoose.connect(process.env.MONGODB_URI)
     process.exit(1);
   });
 
-// Debug middleware to log requests
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.url}`);
   next();
@@ -87,7 +84,6 @@ app.use('/api/group-categories', groupCategoriesRouter);
 // Serve uploaded files
 app.use('/uploads', express.static('uploads'));
 
-// Function to process recurring transactions for all users
 async function processAllUsersRecurringTransactions() {
   try {
     console.log('Starting recurring transactions check for all users');
@@ -97,25 +93,19 @@ async function processAllUsersRecurringTransactions() {
       try {
         console.log(`Processing recurring transactions for user: ${user._id}`);
         
-        // Get upcoming transactions first
         const upcomingTransactions = await getUpcomingRecurringTransactions(user._id);
         if (upcomingTransactions && upcomingTransactions.length > 0) {
           console.log(`Sending warnings for ${upcomingTransactions.length} upcoming transactions`);
-          // Pass user's categories to the email service
           await sendRecurringTransactionWarning(user, upcomingTransactions);
         }
         
-        // Process recurring transactions
         const processedTransactions = await processRecurringTransactions(user._id);
         
-        // Send confirmation emails for processed transactions
         if (processedTransactions && processedTransactions.length > 0) {
           console.log(`Sending confirmations for ${processedTransactions.length} processed transactions`);
-          // Pass user's categories to the email service
           await sendRecurringTransactionConfirmation(user, processedTransactions);
         }
         
-        // Create notifications for processed transactions
         if (processedTransactions && processedTransactions.length > 0) {
           await createRecurringNotifications(user._id, processedTransactions);
         }
@@ -129,13 +119,11 @@ async function processAllUsersRecurringTransactions() {
   }
 }
 
-// Schedule recurring transaction processing every minute
 nodeCron.schedule('* * * * *', async () => {
   console.log('Running scheduled recurring transactions check');
   await processAllUsersRecurringTransactions();
 });
 
-// Schedule loan payment processing (every hour)
 nodeCron.schedule('0 * * * *', async () => {
   console.log('Running hourly loan payment processing...');
   try {
@@ -153,7 +141,6 @@ nodeCron.schedule('0 * * * *', async () => {
   }
 });
 
-// Schedule loan payment reminders (daily at 9 AM)
 nodeCron.schedule('0 9 * * *', async () => {
   console.log('Sending daily loan payment reminders...');
   try {
@@ -170,19 +157,15 @@ nodeCron.schedule('0 9 * * *', async () => {
   }
 });
 
-// Function to safely schedule next check within 32-bit integer limits
 const safeScheduleNextCheck = (userId, nextCheckDate) => {
   const now = new Date();
   const timeUntilNextCheck = nextCheckDate.getTime() - now.getTime();
   
-  // Maximum safe timeout value (about 24.8 days)
   const MAX_TIMEOUT = 2147483647;
   
   if (timeUntilNextCheck <= MAX_TIMEOUT) {
-    // If next check is within safe range, schedule directly
     setTimeout(() => checkRecurringTransactions(userId), timeUntilNextCheck);
   } else {
-    // If next check is too far, schedule intermediate check
     setTimeout(() => {
       safeScheduleNextCheck(userId, nextCheckDate);
     }, MAX_TIMEOUT);
@@ -191,16 +174,13 @@ const safeScheduleNextCheck = (userId, nextCheckDate) => {
   console.log(`Scheduled next check for user ${userId} at ${nextCheckDate.toLocaleString()}`);
 };
 
-// Function to check recurring transactions
 const checkRecurringTransactions = async (userId) => {
   try {
     const user = await User.findById(userId);
     if (!user) return;
 
-    // Track processed transactions to avoid duplicates
     const processedTransactionIds = new Set();
 
-    // Check for upcoming transactions in the next 24 hours
     const upcomingTransactions = await Transaction.find({
       user: userId,
       isRecurring: true,
@@ -211,7 +191,6 @@ const checkRecurringTransactions = async (userId) => {
     });
 
     if (upcomingTransactions.length > 0) {
-      // Filter out transactions that we've already notified about
       const newUpcomingTransactions = upcomingTransactions.filter(tx => {
         const key = `${tx._id}_upcoming`;
         if (processedTransactionIds.has(key)) return false;
@@ -220,7 +199,6 @@ const checkRecurringTransactions = async (userId) => {
       });
 
       if (newUpcomingTransactions.length > 0) {
-        // Send warning email using the imported function
         await sendRecurringTransactionWarning(
           user,
           newUpcomingTransactions.map(tx => ({
@@ -236,7 +214,6 @@ const checkRecurringTransactions = async (userId) => {
       }
     }
 
-    // Check for transactions that should have been processed
     const now = new Date();
     const processedTransactions = await Transaction.find({
       user: userId,
@@ -251,7 +228,6 @@ const checkRecurringTransactions = async (userId) => {
         if (!processedTransactionIds.has(key)) {
           processedTransactionIds.add(key);
 
-          // Create the new transaction instance
           const newTransaction = new Transaction({
             user: userId,
             category: tx.category,
@@ -265,7 +241,6 @@ const checkRecurringTransactions = async (userId) => {
 
           await newTransaction.save();
 
-          // Update the next due date based on frequency
           const nextDueDate = new Date(tx.nextDueDate);
           switch (tx.frequency) {
             case 'daily':
@@ -282,34 +257,27 @@ const checkRecurringTransactions = async (userId) => {
               break;
           }
 
-          // Update the original recurring transaction
           tx.nextDueDate = nextDueDate;
           tx.lastProcessedDate = now;
           await tx.save();
         }
       }
 
-      // Send confirmation email using the imported function
       await sendRecurringTransactionConfirmation(user, processedTransactions);
       console.log(`Sent confirmation email to ${user.email} for ${processedTransactions.length} processed transactions`);
-      
-      // Create notifications for processed transactions
       await createRecurringNotifications(userId, processedTransactions, 'processed');
     }
 
-    // Schedule next check in 1 hour for daily transactions
     const nextCheckDate = new Date(Date.now() + 60 * 60 * 1000);
     safeScheduleNextCheck(userId, nextCheckDate);
 
   } catch (error) {
     console.error('Error checking recurring transactions:', error);
-    // Retry in 5 minutes if there was an error
     const retryDate = new Date(Date.now() + 5 * 60 * 1000);
     safeScheduleNextCheck(userId, retryDate);
   }
 };
 
-// Initialize transaction scheduler
 const initializeTransactionScheduler = async () => {
   try {
     const users = await User.find({});
@@ -327,46 +295,38 @@ const initializeTransactionScheduler = async () => {
   }
 };
 
-// Start the scheduler after database connection is established
 mongoose.connection.once('open', () => {
   console.log('MongoDB connected successfully');
   initializeTransactionScheduler();
 });
 
-// Add user to scheduler when they log in
 app.post('/api/auth/login', async (req, res) => {
   try {
-    // ... existing login logic ...
     
-    // Schedule transaction checks for the logged-in user
     const nextCheckDate = await scheduleNextTransactionCheck(req.user._id);
     
     if (nextCheckDate) {
       safeScheduleNextCheck(req.user._id, nextCheckDate);
     }
     
-    res.json({ /* existing response */ });
+    res.json({ });
   } catch (error) {
     res.status(500).json({ message: 'Error during login' });
   }
 });
 
-// Remove user from scheduler when they log out
 app.post('/api/auth/logout', (req, res) => {
   try {
     const userId = req.user._id;
-    // No need to clear timeout here, as it's handled by the safeScheduleNextCheck function
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
     res.status(500).json({ message: 'Error during logout' });
   }
 });
 
-// Keep server alive
 setInterval(() => {
   console.log('Server is alive:', new Date().toISOString());
   
-  // Ping your MongoDB to keep connection alive
   mongoose.connection.db.admin().ping((err, result) => {
     if (err) {
       console.error('MongoDB ping failed:', err);
