@@ -14,10 +14,8 @@ export const authenticateToken = async (req, res, next) => {
             });
         }
 
-        // First verify the JWT token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         
-        // Find the most recent active session for this user
         const latestSession = await Session.findOne({ 
             userId: decoded.userId,
             isActive: true 
@@ -31,9 +29,7 @@ export const authenticateToken = async (req, res, next) => {
             });
         }
 
-        // Check if the current token matches the latest session token
         if (token !== latestSession.token) {
-            // Get device info from the latest session
             const deviceInfo = latestSession.deviceInfo || 'another device';
             
             return res.status(401).json({
@@ -44,16 +40,14 @@ export const authenticateToken = async (req, res, next) => {
             });
         }
 
-        // Update last activity
         await Session.updateOne(
             { _id: latestSession._id },
             { $set: { lastActivity: new Date() }}
         );
 
-        // Set user info in request
         req.user = {
-            id: decoded.userId, // Add id property
-            userId: decoded.userId // Keep userId for backward compatibility
+            id: decoded.userId, 
+            userId: decoded.userId 
         };
         
         req.session = latestSession;
